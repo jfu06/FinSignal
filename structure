@@ -1,0 +1,88 @@
+finrisk-copilot/
+├── extension/                      # Chrome Extension (Manifest V3)
+│   ├── manifest.json
+│   ├── src/
+│   │   ├── content-scripts/
+│   │   │   ├── edgar-parser.ts     # 解析 SEC EDGAR 页面 DOM，抓取 filing URL/CIK
+│   │   │   ├── ir-page-parser.ts   # 识别公司 IR 页面 PDF/HTML 链接
+│   │   │   └── news-parser.ts      # 财经新闻页面的财报引用识别
+│   │   ├── background/
+│   │   │   └── service-worker.ts   # 管理 API 调用、缓存、跨 tab 状态
+│   │   ├── sidebar/                # 侧边栏 UI（React + Tailwind）
+│   │   │   ├── RiskSignalPanel.tsx     # 风险信号卡片列表
+│   │   │   ├── EarningsCallSentiment.tsx
+│   │   │   ├── QoQDiffViewer.tsx        # 季度对比 diff 视图
+│   │   │   ├── TrafficLightSummary.tsx  # 红/黄/绿 + 一句话结论
+│   │   │   └── hooks/useStreamingResult.ts  # SSE 流式接收后端结果
+│   │   └── shared/types.ts
+│   └── package.json
+│
+├── backend/                         # FastAPI 服务
+│   ├── app/
+│   │   ├── main.py
+│   │   ├── auth/                    # JWT + OAuth2.0
+│   │   │   ├── jwt_handler.py
+│   │   │   └── oauth_providers.py
+│   │   ├── api/
+│   │   │   ├── v1/
+│   │   │   │   ├── filings.py       # POST /analyze  提交 filing URL/CIK
+│   │   │   │   ├── signals.py       # GET /signals/{filing_id}
+│   │   │   │   ├── diff.py          # GET /diff?curr=&prev=
+│   │   │   │   └── earnings_call.py
+│   │   ├── db/
+│   │   │   ├── models.py            # SQLAlchemy: Filing, RiskSignal, Diff, User
+│   │   │   ├── session.py
+│   │   │   └── migrations/          # Alembic
+│   │   ├── ingestion/               # 数据摄入层
+│   │   │   ├── edgar_fetcher.py     # 拉取 10-K/10-Q/8-K 原文
+│   │   │   ├── section_splitter.py  # 按 Item 1A(Risk Factors)/7(MD&A)/9A(Controls) 等章节切分
+│   │   │   └── earnings_call_fetcher.py  # 抓取 transcript (如 Seeking Alpha/公司IR)
+│   │   ├── indexing/
+│   │   │   ├── embedder.py          # OpenAI/Anthropic embedding
+│   │   │   ├── pgvector_store.py    # 500+ filings 的 chunk 级索引
+│   │   │   └── metadata_schema.py   # ticker, fiscal_period, section_type, filing_date
+│   │   ├── agents/                  # 多 Agent 核心
+│   │   │   ├── orchestrator.py      # 编排流程 + 状态机
+│   │   │   ├── retrieval_agent.py   # 查询 pgvector，按信号类型定向检索
+│   │   │   ├── risk_classifier_agent.py  # CoT 推理，分类5类信号
+│   │   │   ├── sentiment_agent.py   # 分析 earnings call 措辞/情绪
+│   │   │   ├── diff_agent.py        # 季度披露对比（新增/删除/措辞变化）
+│   │   │   ├── judge_agent.py       # LLM-as-judge，对照 rubric 交叉验证
+│   │   │   └── prompts/             # 每个 agent 独立管理的 prompt 模板
+│   │   │       ├── risk_classification.yaml
+│   │   │       ├── judge_rubric.yaml
+│   │   │       └── sentiment_analysis.yaml
+│   │   ├── signals/                 # 信号检测的规则+LLM混合层
+│   │   │   ├── going_concern.py
+│   │   │   ├── auditor_change.py
+│   │   │   ├── executive_departure.py
+│   │   │   ├── debt_covenant.py
+│   │   │   └── receivables_anomaly.py
+│   │   └── monitoring/
+│   │       ├── latency_tracker.py
+│   │       └── llm_error_tracker.py
+│   ├── tests/
+│   └── requirements.txt
+│
+├── eval/                            # 独立评估框架（不打包进生产服务）
+│   ├── ground_truth/
+│   │   └── labeled_50_filings.jsonl # 人工标注的 ground truth
+│   ├── pipelines/
+│   │   ├── v1_single_pass_rag.py
+│   │   ├── v2_multi_agent.py
+│   │   └── v3_multi_agent_judge.py
+│   ├── metrics.py                   # precision / recall / hallucination rate
+│   ├── run_eval.py                  # 跑 3 个版本对比
+│   └── reports/                     # 每次 prompt 迭代的结果快照
+│
+├── infra/                           # Azure 部署 + CI/CD
+│   ├── bicep/ or terraform/
+│   ├── docker/
+│   │   ├── Dockerfile.backend
+│   │   └── docker-compose.dev.yml   # 本地起 Postgres+pgvector
+│   └── .github/workflows/
+│       └── deploy-azure.yml
+│
+└── docs/
+    ├── architecture.md
+    └── agent-protocol.md            # 定义 agent 间消息格式/交接协议
