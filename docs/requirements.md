@@ -91,3 +91,20 @@ One Analysis Report corresponds to **one user question + one Ticker/document** c
 - Does displaying financial analysis to retail users trigger any regulatory/compliance requirements (investment advice disclosures, licensing)?
 - Who owns and maintains the Golden Test Set long-term, and how often is it refreshed?
 - Should the unsupported-claim-rate threshold (4%) be uniform across all document types, or vary by type (e.g., 10-K vs. news)?
+
+
+## Assumed Resolutions to Open Questions (Pending Customer/Legal Confirmation)
+
+The three open questions below are addressed here using common industry practice as a working assumption, so the project can move forward. These are engineering assumptions only — not yet confirmed with the customer or legal counsel — and should be validated before launch.
+
+### Regulatory / Compliance Positioning
+
+Assumption: the product stays strictly in "information summarization and citation display," not "personalized investment advice." All outputs are factual analysis of the selected document/ticker with citations; the product never produces buy/sell/hold recommendations or other directive calls to action. The optional User Risk Profile field, if kept, is used only to adjust presentation (e.g., level of detail) and must not change the substance of the analysis itself, since tailoring conclusions to a user's risk profile pushes the product toward "personalized advice" territory. A visible disclaimer ("for informational purposes only, not investment advice") is shown on every report. Under this assumption the product is unlikely to be classified as investment advisory activity, but this must still be confirmed with securities counsel before launch, especially if risk-profile personalization of conclusions is ever introduced.
+
+### Golden Test Set Ownership & Refresh Cadence
+
+Assumption: joint ownership between the analyst/content team (labels ground truth, defines what counts as an unsupported claim) and the evaluation engineering team (turns labels into automated, repeatable test cases). Refresh is event-driven, not fixed-calendar: the full set runs as a release gate on every model/prompt change, and new production failures are triaged and added back into the set on an ongoing basis after human review. A quarterly review is added on top to catch stale labels or outdated source data.
+
+### Unsupported-Claim-Rate Threshold
+
+Assumption: the threshold is set per document type rather than uniformly, since structured filings (10-K/10-Q) have a lower inherent hallucination risk than narrative sources (news, earnings call transcripts). Suggested starting point: 3% for 10-K/10-Q, 5–6% for news/transcripts. Given limited initial data, Phase 1 can launch with a single conservative global threshold (4%) and split it by document type once enough production data has accumulated to calibrate each segment separately.
