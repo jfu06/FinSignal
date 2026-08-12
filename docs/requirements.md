@@ -1,15 +1,19 @@
 # FinSignal — Customer Requirements
 
 ## Customer
+
 A retail-facing fintech startup building an AI investment research assistant for individual investors.
 
 ## Use Case
+
 Retail investors should be able to ask natural-language questions about a stock or financial document (10-K, 10-Q, earnings call transcript, news article) and get instant, trustworthy analysis with verifiable citations — without reading hundreds of pages themselves.
 
 ## Why This Is Urgent
+
 Retail investors are overwhelmed by long, dense financial filings (some 300+ pages). Existing AI research tools already summarize these documents fast, but they don't tell users which parts of the answer are actually grounded in the source document versus made up by the model. Users can't tell if they're making decisions based on real facts or hallucinated ones — this is a trust and safety gap, not just a speed gap.
 
 ## What We Do Today (Baseline Capability)
+
 A user picks a ticker or uploads a document, and the AI generates an instant analysis. Inputs:
 
 - Ticker / Company Name, string
@@ -20,6 +24,7 @@ A user picks a ticker or uploads a document, and the AI generates an instant ana
 - User Risk Profile (optional), enum (Conservative/Moderate/Aggressive)
 
 ## What We Need The Tool To Do
+
 - Allow a retail investor to select a ticker or upload a document
 - Parse and index long documents (up to hundreds of pages) for retrieval
 - Answer the user's question in plain language with inline citations back to the exact source paragraph
@@ -30,6 +35,7 @@ A user picks a ticker or uploads a document, and the AI generates an instant ana
 - Export the analysis report for personal reference
 
 ## Production-Ready Requirements
+
 - Every input is validated
 - Integrity rules always enforce consistency
 - Errors are safe, clear, and contained
@@ -40,22 +46,20 @@ A user picks a ticker or uploads a document, and the AI generates an instant ana
 
 ## Sample Data
 
-```
-Ticker: AAPL
-Document Type: 10-K
-Market Region: US
-User Question: "苹果最近一年的营收增长主要靠什么驱动？有没有风险因素？"
-```
+- Ticker: AAPL
+- Document Type: 10-K
+- Market Region: US
+- User Question: "苹果最近一年的营收增长主要靠什么驱动？有没有风险因素？"
 
----
+## Clarified & Structured Requirements
 
-# Clarified & Structured Requirements
+### Users
 
-## Users
-The direct users are **retail investors**, whose goal is to better understand filings/announcements and make more informed investment decisions — the product does not make investment decisions for them and is not investment advice. Analysts / content team act behind the scenes, maintaining the evaluation dataset and reviewing evaluation results; they do not face retail users directly.
+The direct users are retail investors, whose goal is to better understand filings/announcements and make more informed investment decisions — the product does not make investment decisions for them and is not investment advice. Analysts / content team act behind the scenes, maintaining the evaluation dataset and reviewing evaluation results; they do not face retail users directly.
 
-## Analysis Report
-One Analysis Report corresponds to **one user question + one Ticker/document** combination. Output must include:
+### Analysis Report
+
+One Analysis Report corresponds to one user question + one Ticker/document combination. Output must include:
 
 - Key Insight Summary (plain language)
 - Cited Evidence (each claim with source citation and location)
@@ -64,7 +68,7 @@ One Analysis Report corresponds to **one user question + one Ticker/document** c
 - Unsupported Claims List (claims not backed by the source, called out explicitly)
 - Disclaimer (for reference only, not investment advice)
 
-## Credibility Handling Rules
+### Credibility Handling Rules
 
 | Scenario | Handling | Reason |
 |---|---|---|
@@ -74,7 +78,7 @@ One Analysis Report corresponds to **one user question + one Ticker/document** c
 | Same user asks the same question about the same Ticker/document again | ⚠️ WARNING - offer to reuse cached result or force regeneration | Avoid wasted compute while keeping content fresh |
 | Evaluation Harness detects unsupported claim rate above threshold (e.g. 4%) for a batch | ❌ ERROR - batch is not shipped, triggers auto-retry or manual review | Protect the product's credibility baseline |
 
-## Functional Requirements
+### Functional Requirements
 
 | Feature | Required? | Notes |
 |---|---|---|
@@ -87,24 +91,8 @@ One Analysis Report corresponds to **one user question + one Ticker/document** c
 | Analysis report export | ✅ Required | For the user's personal reference |
 | Historical question/signal review | Optional | Phase 2 |
 
-## Open Questions To Confirm With Customer
+### Open Questions To Confirm With Customer
+
 - Does displaying financial analysis to retail users trigger any regulatory/compliance requirements (investment advice disclosures, licensing)?
 - Who owns and maintains the Golden Test Set long-term, and how often is it refreshed?
 - Should the unsupported-claim-rate threshold (4%) be uniform across all document types, or vary by type (e.g., 10-K vs. news)?
-
-
-## Assumed Resolutions to Open Questions (Pending Customer/Legal Confirmation)
-
-The three open questions below are addressed here using common industry practice as a working assumption, so the project can move forward. These are engineering assumptions only — not yet confirmed with the customer or legal counsel — and should be validated before launch.
-
-### Regulatory / Compliance Positioning
-
-Assumption: the product stays strictly in "information summarization and citation display," not "personalized investment advice." All outputs are factual analysis of the selected document/ticker with citations; the product never produces buy/sell/hold recommendations or other directive calls to action. The optional User Risk Profile field, if kept, is used only to adjust presentation (e.g., level of detail) and must not change the substance of the analysis itself, since tailoring conclusions to a user's risk profile pushes the product toward "personalized advice" territory. A visible disclaimer ("for informational purposes only, not investment advice") is shown on every report. Under this assumption the product is unlikely to be classified as investment advisory activity, but this must still be confirmed with securities counsel before launch, especially if risk-profile personalization of conclusions is ever introduced.
-
-### Golden Test Set Ownership & Refresh Cadence
-
-Assumption: joint ownership between the analyst/content team (labels ground truth, defines what counts as an unsupported claim) and the evaluation engineering team (turns labels into automated, repeatable test cases). Refresh is event-driven, not fixed-calendar: the full set runs as a release gate on every model/prompt change, and new production failures are triaged and added back into the set on an ongoing basis after human review. A quarterly review is added on top to catch stale labels or outdated source data.
-
-### Unsupported-Claim-Rate Threshold
-
-Assumption: the threshold is set per document type rather than uniformly, since structured filings (10-K/10-Q) have a lower inherent hallucination risk than narrative sources (news, earnings call transcripts). Suggested starting point: 3% for 10-K/10-Q, 5–6% for news/transcripts. Given limited initial data, Phase 1 can launch with a single conservative global threshold (4%) and split it by document type once enough production data has accumulated to calibrate each segment separately.
