@@ -1,4 +1,4 @@
-# FinSignal — Design Doc (MVP Scope: 1-2 Day Build)
+# FinSignal — Design Doc 
 
 ## 1. Goal & Scope
 
