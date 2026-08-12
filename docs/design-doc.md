@@ -1,17 +1,32 @@
 # FinSignal — Design Doc 
 
+## 0. Relationship to decisions.md
+
+decisions.md is the running log of target-architecture decisions; this design doc is the Phase-1 (one-day) implementation plan for the narrative/RAG line of that architecture. Where this doc deviates from a recorded decision, the deviation is deliberate and listed here:
+
+| decisions.md decision | Phase 1 status |
+|---|---|
+| Narrative chunks + embeddings in Neon (pgvector) | ✅ Implemented as decided |
+| Claim check as one batch verification call (not per-claim) | ✅ Implemented as decided |
+| Question routing: numeric → SQL/metrics layer, narrative → RAG | ⏸ Deferred to Phase 2 — all questions go through RAG this phase; numeric/aggregation questions get an explicit "not yet supported" data-boundary reply |
+| Numeric data from SEC XBRL Company Facts API | ⏸ Deferred to Phase 2 (schema and pitfalls already documented in data-dictionary.md) |
+| Offline eval gate in CI on every model/prompt change | 🔽 Downgraded: the eval script has release-gate semantics (non-zero exit above threshold) but is run manually this phase |
+| Golden set of 30–50 cases | 🔽 Downgraded: 10–15 cases this phase, same format, grows toward the target |
+| Upload-document trust rules & sanitization | ⏸ Deferred to Phase 2 (fixed local corpus this phase) |
+
 ## 1. Goal & Scope
 
 Build a small end-to-end demo: a user asks a natural-language question about a fixed set of pre-downloaded 10-K filings (2-3 well-known tickers), and gets back an answer with source citations and a per-claim credibility score.
 
-This scope is intentionally small so it can be built and demoed in 1-2 days. Explicitly out of scope for this phase:
+This scope is intentionally small so it can be built and demoed in one focused day. Explicitly out of scope for this phase:
 
 - Live/automated document crawling across the whole market
 - Multi-market, multi-language support
 - Production monitoring dashboards and alerting
-- CI/CD release gating on every model/prompt change
+- CI/CD wiring for the eval gate (the eval script itself is CI-ready, see Section 5)
 - A separately trained/fine-tuned NLI model (use LLM-as-judge only)
-- Vector database infrastructure (in-memory search is enough at this scale)
+- Numeric/XBRL metrics layer and question routing (Phase 2 — see the routing decision in decisions.md and docs/data-dictionary.md)
+- User document upload and content-safety checks (Phase 2)
 
 ## 2. Data Source
 
@@ -25,27 +40,27 @@ The pipeline is intentionally linear, step by step:
 
 1. Fixed 10-K files, downloaded manually and stored locally
 2. Chunking: split each filing by paragraph/section
-3. Embed all chunks once, then use in-memory cosine similarity search (no vector DB needed)
-4. At query time, retrieve the top-k chunks for the user's question
+3. Embed all chunks once, store text + embeddings in a Neon Postgres table (pgvector)
+4. At query time, retrieve the top-k chunks for the user's question from Neon with one pgvector cosine-similarity SQL query
 5. LLM generates an answer as structured JSON, with each claim listing its cited chunk ids
-6. LLM-as-judge scores each claim as SUPPORTED, CONTRADICTED, or NOT_ENOUGH_INFO
-7. Response assembler combines the answer, citations, per-claim credibility, and the overall unsupported rate
+6. One batch verification call (LLM-as-judge) checks all claims at once against their cited chunks, labeling each SUPPORTED, CONTRADICTED, or NOT_ENOUGH_INFO — one LLM call per report, not one per claim
+7. Response assembler combines the answer, citations, per-claim credibility, and the overall unsupported rate, mapping NOT_ENOUGH_INFO → WARNING (shown, marked "unverified") and CONTRADICTED → ERROR (blocked, triggers regeneration) per the credibility rules in requirements.md
 8. Structured logging records each step above (see Section 6)
 
 ## 4. Core Components
 
 - Ingestion & Chunking: a simple script that splits each filing into paragraph/section-level chunks and stores chunk_id, doc_id, text, and section for each one.
-- Retrieval: embed all chunks once (OpenAI embeddings or a local sentence-transformers model), then do cosine similarity search at query time. A Python list/array is enough, no need for Pinecone or Weaviate at this scale.
+- Retrieval: embed all chunks once (OpenAI embeddings or a local sentence-transformers model), store them in a Neon Postgres `chunks` table with a pgvector `embedding` column; query-time top-k is a single `ORDER BY embedding <=> :question_embedding LIMIT k` SQL query. This matches the storage decision in decisions.md and persists embeddings across runs (no re-embedding on every restart); Pinecone/Weaviate remain unnecessary at this scale.
 - Answer Generation: prompt the model to return structured JSON with claims and cited chunk ids instead of free text, for example a claims array where each claim has a text field and a cited_chunk_ids field.
-- Citation-Fidelity Scoring, LLM-as-judge only: for each claim, send the claim text and its cited chunk text to a judge prompt, and get back a verdict plus a one-line reason. No separate NLI model needed for this scope.
+- Citation-Fidelity Scoring, one batch verification call (per decisions.md): after generation, send ALL claims plus their cited chunk texts to the judge in a single call, and get back a verdict plus a one-line reason for each claim — one LLM call per report instead of one per claim, cheaper and faster. No separate NLI model needed for this scope.
 - Aggregation: the unsupported rate for a report equals the count of NOT_ENOUGH_INFO and CONTRADICTED claims divided by the total number of claims.
 
 ## 5. Evaluation (Mini Golden Set, No Existing Dataset Needed)
 
-- Build 10-15 QA pairs manually instead of using a large labeled dataset. First use an LLM to draft candidate questions from the downloaded 10-Ks, then personally verify the correct answer and source paragraph for each one, roughly 1-2 hours of work.
+- Build 10-15 QA pairs manually (the Phase-1 subset of the 30–50-case golden-set target in decisions.md) instead of using a large labeled dataset. First use an LLM to draft candidate questions from the downloaded 10-Ks, then personally verify the correct answer and source paragraph for each one, roughly 1-2 hours of work.
 - Store these as a simple JSON or CSV file with columns for question, ticker, expected_answer_snippet, and expected_chunk_id.
 - Eval script: run the full pipeline on each test case, record the judge's verdict distribution, and report the overall unsupported rate plus a couple of concrete failure examples.
-- No CI/CD gating needed at this scope, just run the eval script manually and include the output or screenshots in your writeup or demo.
+- The eval script doubles as the release gate: it exits non-zero when the unsupported rate exceeds the 4% threshold from project-requirements.md, so it is CI-ready as-is. At this scope, run it manually and include the output in the writeup/demo; wiring it into GitHub Actions is a deferred ~30-minute task.
 
 ## 6. Structured Logging
 
@@ -65,19 +80,23 @@ Why it matters even at this small scale: it lets you compute and chart the unsup
 
 | Table | Key Fields |
 |---|---|
-| Chunk | chunk_id, doc_id, ticker, section, text |
+| Chunk (Neon, pgvector) | chunk_id, doc_id, ticker, section, text, embedding |
 | Claim | claim_id, query_id, text, cited_chunk_ids, verdict, judge_reason |
 | TestCase | case_id, ticker, question, expected_answer_snippet, expected_chunk_id |
+
+Phase 2 adds `xbrl_facts`, `metric_map`, and a QA-log table in the same Neon database — schemas already specified in docs/data-dictionary.md (Section 6).
 
 ## 8. What This Demonstrates
 
 - A working end-to-end RAG pipeline with citation-grounded generation
 - A concrete, quantifiable approach to hallucination detection, using LLM-as-judge scoring instead of just trusting the model
 - Structured logging as the foundation for future evaluation/monitoring, without over-building infrastructure this project doesn't need yet
-- A clear, honest scoping decision about what's in for a 1-2 day MVP and what's explicitly deferred, which is itself worth explaining in an interview
+- A clear, honest scoping decision about what's in for a one-day MVP and what's explicitly deferred, which is itself worth explaining in an interview
 
 ## 9. Possible Next Steps (Not Built Now)
 
 - Expand the Golden Test Set with more tickers and document types
 - Add a small NLI model alongside the LLM-judge for cross-validation
 - Move from local files to an automated EDGAR pull for a wider ticker list
+- Build the numeric line: load SEC companyfacts into `xbrl_facts` (Neon), add `metric_map`, then implement question routing (numeric/aggregation → SQL metrics layer, narrative/explanatory → RAG, hybrid → merge) per decisions.md and docs/data-dictionary.md
+- Add user document upload with the content-safety and trust rules from decisions.md
