@@ -1,0 +1,16 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "finsignal-ui",
+      "runtimeExecutable": "/Users/jiayifu/Desktop/Finsignal/FinSignal/backend/.venv/bin/streamlit",
+      "runtimeArgs": [
+        "run",
+        "/Users/jiayifu/Desktop/Finsignal/FinSignal/backend/ui/app.py",
+        "--server.headless", "true",
+        "--server.port", "8501"
+      ],
+      "port": 8501
+    }
+  ]
+}
