@@ -1,0 +1,24 @@
+# --- Secrets ---
+.env
+*.env
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Runtime artifacts ---
+backend/logs/*.jsonl
+
+# --- Local corpus (downloaded manually; not committed) ---
+backend/data/raw/*
+!backend/data/raw/.gitkeep
+
+# --- OS ---
+.DS_Store
