@@ -62,7 +62,8 @@ def ensure_ticker(
         return {"status": "exists", "ticker": ticker}
     # Server-side corpus cap (public-deployment guardrail): embedding compute
     # and DB storage must not grow unboundedly from anonymous onboarding.
-    if len(existing) >= settings.max_tickers:
+    # max_tickers == 0 means unlimited (the default).
+    if settings.max_tickers and len(existing) >= settings.max_tickers:
         raise OnboardingError(
             f"Corpus limit reached ({settings.max_tickers} companies). "
             f"Currently available: {', '.join(sorted(existing))}."

@@ -199,7 +199,7 @@ default for local dev):
 | `ACCESS_CODE` | Non-empty → UI requires this code before use |
 | `SESSION_QUERY_LIMIT` | Max questions per browser session (default 10) |
 | `DAILY_QUERY_BUDGET` | Max questions per UTC day across all users (default 50) |
-| `MAX_TICKERS` | Corpus cap for on-demand onboarding (default 10, enforced server-side) |
+| `MAX_TICKERS` | Corpus cap for on-demand onboarding, enforced server-side (0 = unlimited, the default) |
 
 Also recommended: set a monthly spend limit on the Anthropic key in their
 console (hard backstop), and rotate any credentials before going live.

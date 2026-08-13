@@ -54,3 +54,17 @@ class TestCorpusCap:
         monkeypatch.setattr(onboarding, "known_tickers", lambda s: crowded)
         result = onboarding.ensure_ticker("T00", settings=settings)
         assert result["status"] == "exists"
+
+    def test_zero_means_unlimited(self, monkeypatch, tmp_path):
+        import dataclasses
+        settings = dataclasses.replace(make_settings(tmp_path), max_tickers=0)
+        crowded = {f"T{i:02d}" for i in range(500)}
+        monkeypatch.setattr(onboarding, "known_tickers", lambda s: crowded)
+        # cap disabled -> proceeds past the check into resolution
+        called = []
+        monkeypatch.setattr(onboarding, "resolve_ticker",
+                            lambda t: called.append(t) or (_ for _ in ()).throw(
+                                onboarding.EdgarError("stop here")))
+        with pytest.raises(onboarding.EdgarError, match="stop here"):
+            onboarding.ensure_ticker("NVDA", settings=settings)
+        assert called == ["NVDA"]
