@@ -169,6 +169,8 @@ def generate_answer(
         query_id=query_id, stage="generation", model=settings.llm_model,
         stop_reason=response.stop_reason, prompt=user_msg,
         output=payload.model_dump(),
+        input_tokens=response.usage.input_tokens,
+        output_tokens=response.usage.output_tokens,
     )
 
     valid_ids = {c.chunk_id for c in chunks}

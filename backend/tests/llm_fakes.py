@@ -56,4 +56,8 @@ class FakeAnthropic:
 
 def tool_response(input_data: dict, stop_reason: str = "tool_use"):
     block = SimpleNamespace(type="tool_use", input=input_data)
-    return SimpleNamespace(content=[block], stop_reason=stop_reason)
+    return SimpleNamespace(
+        content=[block],
+        stop_reason=stop_reason,
+        usage=SimpleNamespace(input_tokens=100, output_tokens=50),
+    )

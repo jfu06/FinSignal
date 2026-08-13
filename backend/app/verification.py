@@ -158,6 +158,8 @@ def verify_claims_batch(
         query_id=query_id, stage="judge", model=settings.llm_model,
         stop_reason=response.stop_reason, prompt=judge_prompt,
         output=tool_use.input,
+        input_tokens=response.usage.input_tokens,
+        output_tokens=response.usage.output_tokens,
     )
     for claim in claims:
         log_event(

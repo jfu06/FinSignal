@@ -128,6 +128,8 @@ def _assess(
         "llm_call", settings.log_path,
         query_id=query_id, stage="assess", model=settings.assess_model,
         stop_reason=response.stop_reason, prompt=prompt, output=result,
+        input_tokens=response.usage.input_tokens,
+        output_tokens=response.usage.output_tokens,
     )
     return result
 

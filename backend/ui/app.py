@@ -31,6 +31,7 @@ from app.config import get_settings  # noqa: E402
 from app.edgar import EdgarError  # noqa: E402
 from app.onboarding import OnboardingError, ensure_ticker, known_tickers  # noqa: E402
 from app.pipeline import PipelineError, answer_question  # noqa: E402
+from app.followup import condense_followup  # noqa: E402
 from app.smoke_eval import load_smoke_result, run_smoke_eval  # noqa: E402
 from app.usage import daily_budget_left  # noqa: E402
 
@@ -166,67 +167,69 @@ with st.sidebar:
 # ----------------------------- main --------------------------------------
 st.header("Ask the 10-K")
 
-with st.form("ask"):
-    question = st.text_input(
-        "Your question (any language)",
-        placeholder="e.g. What drove revenue growth last year? Any risk factors?",
-    )
-    submitted = st.form_submit_button("Analyze", type="primary")
+history: list[dict] = st.session_state.setdefault("chat", [])
 
-if submitted and question.strip():
-    # --- usage guardrails: per-session limit + global daily budget ---
-    asked = st.session_state.get("questions_asked", 0)
-    if asked >= settings().session_query_limit:
+
+def render_report(report: dict, key: str) -> None:
+    """Render one verified report inside an assistant chat bubble."""
+
+    if report.get("supported", True) is False:
         st.warning(
-            f"Session limit reached ({settings().session_query_limit} questions). "
-            f"Refresh the page to start a new session."
+            "Numeric/aggregation questions (averages, growth rates, CAGR, "
+            "ratios) aren't supported yet — that's the Phase-2 structured "
+            "metrics layer. Try a descriptive question instead.",
+            icon="⛔",
         )
-    elif daily_budget_left(settings().log_path, settings().daily_query_budget) <= 0:
-        st.warning(
-            "Today's global query budget is used up — please come back tomorrow. "
-            "(This demo caps daily LLM spend.)"
-        )
-    else:
-        st.session_state["questions_asked"] = asked + 1
-        with st.spinner("Retrieve → generate → batch-verify… (typically < 60 s)"):
-            try:
-                st.session_state["report"] = answer_question(
-                    question, ticker, settings=settings()
-                )
-            except PipelineError as exc:
-                st.session_state.pop("report", None)
-                st.error(f"Invalid input: {exc}")
-            except Exception as exc:  # noqa: BLE001 — surface, don't crash the app
-                st.session_state.pop("report", None)
-                st.error(f"Analysis failed, please retry. ({exc})")
+        return
 
-report = st.session_state.get("report")
-if not report:
-    st.stop()
-
-# --- numeric-boundary reply ---
-if report.get("supported", True) is False:
-    st.warning(
-        "Numeric/aggregation questions (averages, growth rates, CAGR, ratios) "
-        "aren't supported yet — that's the Phase-2 structured metrics layer. "
-        "Please ask a descriptive question instead, e.g. “What drove revenue "
-        "growth?”",
-        icon="⛔",
+    st.markdown(report["summary"])
+    ok_claims = [c for c in report["claims"] if not c["unverified"]]
+    warn_claims = [c for c in report["claims"] if c["unverified"]]
+    st.caption(
+        f"{len(report['claims'])} claims · {len(ok_claims)} verified · "
+        f"{len(warn_claims)} unverified · unsupported rate "
+        f"{report['unsupported_rate']:.0%} · {report.get('latency_s', 0):.0f}s"
     )
-    st.stop()
 
-# --- summary + metrics ---
-st.subheader("Key insights")
-st.info(report["summary"])
+    for c in ok_claims:
+        render_claim(c)
+    if warn_claims:
+        acknowledged = st.checkbox(
+            f"Show {len(warn_claims)} unverified claim(s) — I understand they "
+            f"could not be sufficiently grounded in the filing.",
+            key=f"ack_{key}",
+        )
+        if acknowledged:
+            for c in warn_claims:
+                render_claim(c)
+    if report["blocked_claims"]:
+        st.error(
+            f"⛔ {len(report['blocked_claims'])} claim(s) contradicting the "
+            f"filing were blocked and are not shown.",
+            icon="⛔",
+        )
+    if report["risk_flags"]:
+        st.markdown("**Risk flags**")
+        for r in report["risk_flags"]:
+            st.markdown(f"- 🚩 {r}")
 
-ok_claims = [c for c in report["claims"] if not c["unverified"]]
-warn_claims = [c for c in report["claims"] if c["unverified"]]
-m1, m2, m3, m4, m5 = st.columns(5)
-m1.metric("Claims", len(report["claims"]))
-m2.metric("Verified", len(ok_claims))
-m3.metric("Unverified ⚠️", len(warn_claims))
-m4.metric("Unsupported rate", f"{report['unsupported_rate']:.0%}")
-m5.metric("Latency", f"{report.get('latency_s', 0):.0f} s")
+    retr = report.get("retrieval", {})
+    with st.expander("🔍 Retrieval trace (agentic refinement loop)"):
+        st.markdown(
+            f"- Rounds: **{retr.get('rounds', 1)}** · decisions: "
+            f"**{' → '.join(retr.get('decisions', [])) or 'ENOUGH'}**\n"
+            f"- Final query: `{retr.get('final_query', '')[:120]}` · "
+            f"top-k: **{retr.get('final_k', '-')}**\n"
+            f"- Chunks: {', '.join(report.get('retrieved_chunk_ids', []))}"
+        )
+    st.download_button(
+        "⬇️ Export report (JSON)",
+        data=json.dumps(report, ensure_ascii=False, indent=2),
+        file_name=f"finsignal_{report['ticker']}_{report['query_id']}.json",
+        mime="application/json",
+        key=f"dl_{key}",
+    )
+    st.caption(report["disclaimer"])
 
 
 def render_claim(c: dict) -> None:
@@ -247,65 +250,65 @@ def render_claim(c: dict) -> None:
         section = cite.get("section") or "(no section label)"
         with st.expander(f"📄 View source — {cite['chunk_id']} · {section}"):
             st.text(cite["preview"])
-    st.divider()
 
 
-# --- verified claims ---
-st.subheader("Findings (verified)")
-if ok_claims:
-    for c in ok_claims:
-        render_claim(c)
-else:
+# --- replay the conversation ---
+for i, turn in enumerate(history):
+    with st.chat_message("user"):
+        st.markdown(f"**[{turn['ticker']}]** {turn['question']}")
+        if turn.get("standalone") and turn["standalone"] != turn["question"]:
+            st.caption(f"Interpreted as: {turn['standalone']}")
+    with st.chat_message("assistant"):
+        if turn.get("error"):
+            st.error(turn["error"])
+        else:
+            render_report(turn["report"], key=turn["report"]["query_id"])
+
+if not history:
     st.caption(
-        "No verified claims this time — the filing may not contain the "
-        "requested information. The system does not invent answers."
+        "Ask anything about the selected company's 10-K — e.g. "
+        "\u201cWhat drove revenue growth last year? Any risk factors?\u201d "
+        "Follow-up questions are welcome; each answer is claim-checked "
+        "against the filing."
     )
 
-# --- WARNING claims: hidden until acknowledged (requirements.md rule) ---
-if warn_claims:
-    st.subheader(f"Unverified claims ({len(warn_claims)})")
-    acknowledged = st.checkbox(
-        "I understand: the claims below could **not be sufficiently grounded "
-        "in the filing**. Lower credibility — for reference only.",
-        key="ack_warnings",
-    )
-    if acknowledged:
-        for c in warn_claims:
-            render_claim(c)
+prompt = st.chat_input(f"Ask about {ticker}… (any language, follow-ups OK)")
+if prompt and prompt.strip():
+    prompt = prompt.strip()
+    # --- usage guardrails: per-session limit + global daily budget ---
+    if len(history) >= settings().session_query_limit:
+        st.warning(
+            f"Session limit reached ({settings().session_query_limit} "
+            f"questions). Refresh the page to start a new session."
+        )
+    elif daily_budget_left(settings().log_path, settings().daily_query_budget) <= 0:
+        st.warning(
+            "Today's global query budget is used up — please come back "
+            "tomorrow. (This demo caps daily LLM spend.)"
+        )
     else:
-        st.caption("Check the box above to reveal them.")
-
-# --- blocked claims: never displayed, count only ---
-if report["blocked_claims"]:
-    st.error(
-        f"⛔ {len(report['blocked_claims'])} claim(s) contradicting the filing "
-        f"were blocked and are not shown (recorded for offline review).",
-        icon="⛔",
-    )
-
-# --- risk flags ---
-if report["risk_flags"]:
-    st.subheader("Risk flags")
-    for r in report["risk_flags"]:
-        st.markdown(f"- 🚩 {r}")
-
-# --- how the answer was produced (agentic trace) ---
-retr = report.get("retrieval", {})
-with st.expander("🔍 Retrieval trace (agentic refinement loop)"):
-    st.markdown(
-        f"- Rounds: **{retr.get('rounds', 1)}**\n"
-        f"- Assessor decisions: **{' → '.join(retr.get('decisions', [])) or 'ENOUGH'}**\n"
-        f"- Final query: `{retr.get('final_query', '')[:120]}`\n"
-        f"- Final top-k: **{retr.get('final_k', '-')}**\n"
-        f"- Retrieved chunks: {', '.join(report.get('retrieved_chunk_ids', []))}"
-    )
-
-# --- export (requirements.md: report export) ---
-st.download_button(
-    "⬇️ Export report (JSON)",
-    data=json.dumps(report, ensure_ascii=False, indent=2),
-    file_name=f"finsignal_{report['ticker']}_{report['query_id']}.json",
-    mime="application/json",
-)
-
-st.caption(report["disclaimer"])
+        with st.chat_message("user"):
+            st.markdown(f"**[{ticker}]** {prompt}")
+        with st.chat_message("assistant"):
+            with st.spinner("Retrieve → generate → batch-verify… (typically < 60 s)"):
+                turn: dict = {"question": prompt, "ticker": ticker}
+                try:
+                    qa_history = [
+                        {"question": t["question"],
+                         "summary": t["report"]["summary"]}
+                        for t in history
+                        if t.get("report") and t["report"].get("supported", True)
+                    ]
+                    standalone = condense_followup(
+                        prompt, qa_history, settings=settings()
+                    )
+                    turn["standalone"] = standalone
+                    turn["report"] = answer_question(
+                        standalone, ticker, settings=settings()
+                    )
+                except PipelineError as exc:
+                    turn["error"] = f"Invalid input: {exc}"
+                except Exception as exc:  # noqa: BLE001
+                    turn["error"] = f"Analysis failed, please retry. ({exc})"
+        history.append(turn)
+        st.rerun()
