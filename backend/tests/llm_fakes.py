@@ -23,6 +23,10 @@ def make_settings(tmp_path: Path) -> Settings:
         top_k=6,
         unsupported_rate_threshold=0.04,
         log_path=tmp_path / "events.jsonl",
+        access_code="",
+        session_query_limit=10,
+        daily_query_budget=50,
+        max_tickers=10,
     )
 
 

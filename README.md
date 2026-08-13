@@ -179,6 +179,25 @@ the block above is a copy for convenience.
 
 ---
 
+## Deploying publicly
+
+The app runs anywhere Streamlit runs (Hugging Face Spaces recommended: free
+tier fits torch + the local embedding model). All config is env-driven — set
+`DATABASE_URL` and `ANTHROPIC_API_KEY` as platform secrets, no code changes.
+
+**Before exposing to the internet, activate the cost guardrails** (inactive by
+default for local dev):
+
+| Env var | Effect |
+|---|---|
+| `ACCESS_CODE` | Non-empty → UI requires this code before use |
+| `SESSION_QUERY_LIMIT` | Max questions per browser session (default 10) |
+| `DAILY_QUERY_BUDGET` | Max questions per UTC day across all users (default 50) |
+| `MAX_TICKERS` | Corpus cap for on-demand onboarding (default 10, enforced server-side) |
+
+Also recommended: set a monthly spend limit on the Anthropic key in their
+console (hard backstop), and rotate any credentials before going live.
+
 ## Tests
 
 ```bash

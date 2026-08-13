@@ -17,6 +17,7 @@ Run (from backend/):
 
 from __future__ import annotations
 
+import hmac
 import json
 import sys
 from pathlib import Path
@@ -28,9 +29,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import get_settings  # noqa: E402
 from app.edgar import EdgarError  # noqa: E402
-from app.onboarding import ensure_ticker, known_tickers  # noqa: E402
+from app.onboarding import OnboardingError, ensure_ticker, known_tickers  # noqa: E402
 from app.pipeline import PipelineError, answer_question  # noqa: E402
 from app.smoke_eval import load_smoke_result, run_smoke_eval  # noqa: E402
+from app.usage import daily_budget_left  # noqa: E402
 
 st.set_page_config(page_title="FinSignal", page_icon="📑", layout="wide")
 
@@ -40,6 +42,21 @@ EVAL_COVERED = {"AAPL", "MSFT", "TSLA"}  # tickers the offline golden set covers
 @st.cache_resource
 def settings():
     return get_settings()
+
+
+# --- access gate (public-deployment guardrail; disabled when no ACCESS_CODE) ---
+_s = settings()
+if _s.access_code and not st.session_state.get("authed"):
+    st.title("📑 FinSignal")
+    st.caption("This demo is access-protected to keep API costs bounded.")
+    code = st.text_input("Access code", type="password")
+    if st.button("Enter", type="primary"):
+        if hmac.compare_digest(code.strip(), _s.access_code):
+            st.session_state["authed"] = True
+            st.rerun()
+        else:
+            st.error("Wrong access code.")
+    st.stop()
 
 
 @st.cache_data(ttl=600)
@@ -124,7 +141,7 @@ with st.sidebar:
                             )
                         tickers.clear()          # refresh the dropdown
                         st.rerun()
-                    except EdgarError as exc:
+                    except (EdgarError, OnboardingError) as exc:
                         s.update(label="Onboarding failed", state="error")
                         st.error(str(exc))
                     except Exception as exc:  # noqa: BLE001
@@ -157,17 +174,31 @@ with st.form("ask"):
     submitted = st.form_submit_button("Analyze", type="primary")
 
 if submitted and question.strip():
-    with st.spinner("Retrieve → generate → batch-verify… (typically < 60 s)"):
-        try:
-            st.session_state["report"] = answer_question(
-                question, ticker, settings=settings()
-            )
-        except PipelineError as exc:
-            st.session_state.pop("report", None)
-            st.error(f"Invalid input: {exc}")
-        except Exception as exc:  # noqa: BLE001 — surface, don't crash the app
-            st.session_state.pop("report", None)
-            st.error(f"Analysis failed, please retry. ({exc})")
+    # --- usage guardrails: per-session limit + global daily budget ---
+    asked = st.session_state.get("questions_asked", 0)
+    if asked >= settings().session_query_limit:
+        st.warning(
+            f"Session limit reached ({settings().session_query_limit} questions). "
+            f"Refresh the page to start a new session."
+        )
+    elif daily_budget_left(settings().log_path, settings().daily_query_budget) <= 0:
+        st.warning(
+            "Today's global query budget is used up — please come back tomorrow. "
+            "(This demo caps daily LLM spend.)"
+        )
+    else:
+        st.session_state["questions_asked"] = asked + 1
+        with st.spinner("Retrieve → generate → batch-verify… (typically < 60 s)"):
+            try:
+                st.session_state["report"] = answer_question(
+                    question, ticker, settings=settings()
+                )
+            except PipelineError as exc:
+                st.session_state.pop("report", None)
+                st.error(f"Invalid input: {exc}")
+            except Exception as exc:  # noqa: BLE001 — surface, don't crash the app
+                st.session_state.pop("report", None)
+                st.error(f"Analysis failed, please retry. ({exc})")
 
 report = st.session_state.get("report")
 if not report:

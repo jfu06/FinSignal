@@ -36,6 +36,11 @@ class Settings:
     top_k: int
     unsupported_rate_threshold: float
     log_path: Path
+    # --- public-deployment guardrails (all no-ops by default for local dev) ---
+    access_code: str            # non-empty -> UI requires this code to enter
+    session_query_limit: int    # max questions per browser session
+    daily_query_budget: int     # max questions per UTC day across all users
+    max_tickers: int            # cap on corpus size via on-demand onboarding
 
 
 def _require(name: str) -> str:
@@ -92,4 +97,8 @@ def get_settings() -> Settings:
         top_k=_int("TOP_K", 6),
         unsupported_rate_threshold=_float("UNSUPPORTED_RATE_THRESHOLD", 0.04),
         log_path=log_path,
+        access_code=(os.getenv("ACCESS_CODE") or "").strip(),
+        session_query_limit=_int("SESSION_QUERY_LIMIT", 10),
+        daily_query_budget=_int("DAILY_QUERY_BUDGET", 50),
+        max_tickers=_int("MAX_TICKERS", 10),
     )

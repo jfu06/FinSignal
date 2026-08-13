@@ -28,6 +28,10 @@ from .logging_utils import log_event
 Progress = Callable[[str], None]
 
 
+class OnboardingError(RuntimeError):
+    """User-displayable onboarding refusal (e.g. corpus cap reached)."""
+
+
 def _noop(_: str) -> None:  # pragma: no cover - trivial
     pass
 
@@ -53,8 +57,16 @@ def ensure_ticker(
     settings = settings or get_settings()
     ticker = ticker.strip().upper()
 
-    if ticker in known_tickers(settings):
+    existing = known_tickers(settings)
+    if ticker in existing:
         return {"status": "exists", "ticker": ticker}
+    # Server-side corpus cap (public-deployment guardrail): embedding compute
+    # and DB storage must not grow unboundedly from anonymous onboarding.
+    if len(existing) >= settings.max_tickers:
+        raise OnboardingError(
+            f"Corpus limit reached ({settings.max_tickers} companies). "
+            f"Currently available: {', '.join(sorted(existing))}."
+        )
 
     progress("Resolving ticker (SEC registry)…")
     entry = resolve_ticker(ticker)  # raises EdgarError if unknown
