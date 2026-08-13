@@ -1,0 +1,335 @@
+"""Query-time orchestration as a LangGraph StateGraph (design-doc §3).
+
+The pipeline is a compiled graph with explicit nodes and edges:
+
+    START → boundary_check ─┬→ END                    (numeric question)
+                            └→ retrieve → generate → verify ─┬→ assemble → END
+                                              ↑               │
+                                              └ flag_regen ←──┘ (CONTRADICTED,
+                                                                 first time only)
+
+Every node is a plain function over a typed state dict, so each stage stays
+independently testable and the regeneration loop is an explicit conditional
+edge instead of buried control flow.
+
+Phase-1 boundaries:
+- Numeric/aggregation questions are NOT routed to a metrics layer (that is
+  Phase 2). A conservative keyword guard returns an explicit "not yet
+  supported" reply instead — this is a data-boundary notice, not the Phase-2
+  router.
+- If the judge marks any claim CONTRADICTED, the graph loops back to
+  generate ONCE with the judge's feedback, re-verifies (again one batch
+  call), and keeps the attempt whose claims survive. Still-contradicted
+  claims after the retry are blocked by the assembler.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+import time
+import uuid
+from typing import Any, TypedDict
+
+from langgraph.graph import END, START, StateGraph
+
+from .assembler import assemble_report
+from .config import Settings, get_settings
+from .db import connect
+from .generation import generate_answer
+from .logging_utils import log_event
+from .models import Chunk, Claim, Verdict
+from .refinement import RefinementTrace, retrieve_refined
+from .verification import verify_claims_batch
+
+# Conservative guard for explicitly computational/aggregation asks.
+# Deliberately narrow: "营收增长主要靠什么驱动" is narrative and must NOT match.
+_NUMERIC_PATTERNS = [
+    r"CAGR", r"复合增长率", r"年均增长",
+    r"平均", r"\baverage\b", r"\bmean\b", r"\bmedian\b", r"中位数",
+    r"环比", r"合计", r"总和", r"\bsum\b",
+    r"计算", r"算一下", r"\bcalculate\b", r"\bcompute\b",
+    r"增长率是多少", r"增长了百分之多少", r"growth rate", r"percent(?:age)? change",
+    r"多少倍", r"比率是多少", r"\bratio\b", r"利润率是多少", r"毛利率是多少",
+]
+_NUMERIC_RE = re.compile("|".join(_NUMERIC_PATTERNS), re.IGNORECASE)
+
+NUMERIC_NOT_SUPPORTED_MSG = (
+    "数值计算/聚合类问题（如平均值、增长率、CAGR、比率计算）暂不支持——"
+    "该能力属于二期的结构化指标层（SEC XBRL），本期仅支持基于 10-K 原文的"
+    "叙述类问答。请改用描述性问题，例如“营收增长的主要驱动因素是什么？”"
+)
+
+
+class PipelineError(ValueError):
+    """Invalid user input (unknown ticker, empty question, …)."""
+
+
+class PipelineState(TypedDict, total=False):
+    """State carried between graph nodes."""
+
+    question: str
+    ticker: str
+    query_id: str
+    numeric_rejected: bool
+    chunks: list[Chunk]
+    refinement: RefinementTrace
+    summary: str
+    claims: list[Claim]
+    regenerated: bool
+    feedback: str
+    report: dict[str, Any]
+
+
+def is_numeric_question(question: str) -> bool:
+    """True if the question explicitly asks for computation/aggregation."""
+
+    return bool(_NUMERIC_RE.search(question))
+
+
+def _known_tickers(settings: Settings) -> set[str]:
+    with connect(settings) as conn, conn.cursor() as cur:
+        cur.execute("SELECT DISTINCT ticker FROM chunks")
+        return {r[0] for r in cur.fetchall()}
+
+
+def _persist_claims(claims: list[Claim], settings: Settings) -> None:
+    if not claims:
+        return
+    with connect(settings) as conn, conn.cursor() as cur:
+        cur.executemany(
+            """
+            INSERT INTO claims
+                (claim_id, query_id, text, cited_chunk_ids, verdict, judge_reason)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (claim_id) DO UPDATE SET
+                text = EXCLUDED.text,
+                cited_chunk_ids = EXCLUDED.cited_chunk_ids,
+                verdict = EXCLUDED.verdict,
+                judge_reason = EXCLUDED.judge_reason
+            """,
+            [
+                (
+                    c.claim_id,
+                    c.query_id,
+                    c.text,
+                    c.cited_chunk_ids,
+                    c.verdict.value if c.verdict else None,
+                    c.judge_reason,
+                )
+                for c in claims
+            ],
+        )
+        conn.commit()
+
+
+def _contradiction_feedback(claims: list[Claim]) -> str:
+    lines = [
+        f"- {c.text!r}: {c.judge_reason}"
+        for c in claims
+        if c.verdict is Verdict.CONTRADICTED
+    ]
+    return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------
+# Graph construction: one node per pipeline stage, edges = the design-doc flow.
+# Nodes close over `settings` but call the module-level stage functions, so
+# tests can monkeypatch individual stages without touching the graph.
+# --------------------------------------------------------------------------
+
+
+def build_graph(settings: Settings):
+    """Compile the QA pipeline as a LangGraph StateGraph."""
+
+    def boundary_check(state: PipelineState) -> PipelineState:
+        # Phase-1 data boundary: numeric/aggregation questions not supported.
+        if is_numeric_question(state["question"]):
+            log_event(
+                "numeric_question_rejected", settings.log_path,
+                query_id=state["query_id"], ticker=state["ticker"],
+            )
+            return {
+                "numeric_rejected": True,
+                "report": {
+                    "query_id": state["query_id"],
+                    "ticker": state["ticker"],
+                    "question": state["question"],
+                    "supported": False,
+                    "message": NUMERIC_NOT_SUPPORTED_MSG,
+                },
+            }
+        return {"numeric_rejected": False}
+
+    def retrieve(state: PipelineState) -> PipelineState:
+        # Bounded agentic refinement loop (see app.refinement).
+        chunks, trace = retrieve_refined(
+            state["question"], state["ticker"],
+            settings=settings, query_id=state["query_id"],
+        )
+        return {"chunks": chunks, "refinement": trace}
+
+    def generate(state: PipelineState) -> PipelineState:
+        # Second pass gets an "r" suffix so both attempts stay on record.
+        gen_id = state["query_id"] + ("r" if state.get("regenerated") else "")
+        summary, claims = generate_answer(
+            gen_id, state["question"], state["chunks"],
+            settings=settings, feedback=state.get("feedback"),
+        )
+        return {"summary": summary, "claims": claims}
+
+    def verify(state: PipelineState) -> PipelineState:
+        # ONE batch judge call per attempt; verdicts persisted immediately.
+        chunks_by_id = {c.chunk_id: c for c in state["chunks"]}
+        claims = verify_claims_batch(state["claims"], chunks_by_id, settings=settings)
+        _persist_claims(claims, settings)
+        return {"claims": claims}
+
+    def flag_regeneration(state: PipelineState) -> PipelineState:
+        # CONTRADICTED -> ERROR: record + arm the single regeneration pass.
+        log_event(
+            "regeneration_triggered", settings.log_path,
+            query_id=state["query_id"],
+            contradicted_claim_ids=[
+                c.claim_id for c in state["claims"]
+                if c.verdict is Verdict.CONTRADICTED
+            ],
+        )
+        return {
+            "regenerated": True,
+            "feedback": _contradiction_feedback(state["claims"]),
+        }
+
+    def assemble(state: PipelineState) -> PipelineState:
+        report = assemble_report(
+            state["query_id"], state["question"], state["ticker"],
+            state["summary"], state["claims"], state["chunks"],
+        )
+        report["retrieved_chunk_ids"] = [c.chunk_id for c in state["chunks"]]
+        trace = state["refinement"]
+        report["retrieval"] = {
+            "rounds": trace.rounds,
+            "decisions": trace.decisions,
+            "final_query": trace.final_query,
+            "final_k": trace.final_k,
+        }
+        log_event(
+            "report_summary", settings.log_path,
+            query_id=state["query_id"],
+            unsupported_rate=report["unsupported_rate"],
+            num_claims=len(state["claims"]),
+            num_blocked=len(report["blocked_claims"]),
+        )
+        return {"report": report}
+
+    def route_after_boundary(state: PipelineState) -> str:
+        return "rejected" if state["numeric_rejected"] else "narrative"
+
+    def route_after_verify(state: PipelineState) -> str:
+        contradicted = any(
+            c.verdict is Verdict.CONTRADICTED for c in state["claims"]
+        )
+        if contradicted and not state.get("regenerated"):
+            return "regenerate"
+        return "assemble"
+
+    graph = StateGraph(PipelineState)
+    graph.add_node("boundary_check", boundary_check)
+    graph.add_node("retrieve", retrieve)
+    graph.add_node("generate", generate)
+    graph.add_node("verify", verify)
+    graph.add_node("flag_regeneration", flag_regeneration)
+    graph.add_node("assemble", assemble)
+
+    graph.add_edge(START, "boundary_check")
+    graph.add_conditional_edges(
+        "boundary_check", route_after_boundary,
+        {"rejected": END, "narrative": "retrieve"},
+    )
+    graph.add_edge("retrieve", "generate")
+    graph.add_edge("generate", "verify")
+    graph.add_conditional_edges(
+        "verify", route_after_verify,
+        {"regenerate": "flag_regeneration", "assemble": "assemble"},
+    )
+    graph.add_edge("flag_regeneration", "generate")  # the one-shot retry loop
+    graph.add_edge("assemble", END)
+    return graph.compile()
+
+
+def answer_question(
+    question: str,
+    ticker: str,
+    settings: Settings | None = None,
+    query_id: str | None = None,
+) -> dict:
+    """Run the full RAG pipeline graph for one question; returns the report."""
+
+    settings = settings or get_settings()
+    query_id = query_id or f"q{uuid.uuid4().hex[:8]}"
+
+    # --- input validation (production-quality requirement) ---
+    if not question or not question.strip():
+        raise PipelineError("question must be a non-empty string")
+    question = question.strip()
+    ticker = (ticker or "").strip().upper()
+    known = _known_tickers(settings)
+    if ticker not in known:
+        raise PipelineError(
+            f"Unknown ticker {ticker!r}. Ingested tickers: {sorted(known)}"
+        )
+
+    log_event(
+        "query_received", settings.log_path,
+        query_id=query_id, ticker=ticker, question=question,
+    )
+
+    started = time.monotonic()
+    graph = build_graph(settings)
+    final_state = graph.invoke(
+        {"question": question, "ticker": ticker, "query_id": query_id}
+    )
+    report = final_state["report"]
+    report["latency_s"] = round(time.monotonic() - started, 1)
+    return report
+
+
+def _print_report(report: dict) -> None:  # pragma: no cover - CLI rendering
+    if not report.get("supported", True):
+        print(f"\n⛔ {report['message']}")
+        return
+    print(f"\n### 摘要\n{report['summary']}\n")
+    print("### 结论")
+    for c in report["claims"]:
+        mark = "⚠️ [未验证]" if c["unverified"] else "✅"
+        cites = ", ".join(x["chunk_id"] for x in c["citations"]) or "无引用"
+        print(f"{mark} ({c['credibility']:.1f}) {c['text']}")
+        print(f"    ↳ 引用: {cites}")
+    if report["risk_flags"]:
+        print("\n### 风险提示")
+        for r in report["risk_flags"]:
+            print(f"- {r}")
+    if report["unsupported_claims"]:
+        print("\n### 未支持结论清单")
+        for u in report["unsupported_claims"]:
+            print(f"- {u['text']}  (原因: {u['reason']})")
+    if report["blocked_claims"]:
+        print(f"\n(已拦截 {len(report['blocked_claims'])} 条与原文矛盾的结论,不予展示)")
+    retr = report.get("retrieval", {})
+    if retr.get("rounds", 1) > 1:
+        print(f"\n(检索经过 {retr['rounds']} 轮优化: {' → '.join(retr['decisions'])}"
+              f"; 最终查询: {retr['final_query'][:80]!r}, k={retr['final_k']})")
+    print(f"\n无依据结论率: {report['unsupported_rate']:.1%}")
+    print(f"\n{report['disclaimer']}")
+
+
+if __name__ == "__main__":  # pragma: no cover - operational entry point
+    if len(sys.argv) < 3:
+        raise SystemExit('usage: python -m app.pipeline "<question>" <TICKER> [out.json]')
+    result = answer_question(sys.argv[1], sys.argv[2])
+    _print_report(result)
+    if len(sys.argv) > 3:
+        with open(sys.argv[3], "w", encoding="utf-8") as fh:
+            json.dump(result, fh, ensure_ascii=False, indent=2)
+        print(f"\n[report exported to {sys.argv[3]}]")
