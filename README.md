@@ -1,3 +1,14 @@
+---
+title: FinSignal
+emoji: 📑
+colorFrom: blue
+colorTo: gray
+sdk: streamlit
+sdk_version: "1.61.1"
+app_file: backend/ui/app.py
+pinned: false
+---
+
 # FinSignal — Phase 1 (RAG line)
 
 A verifiable, citation-grounded Q&A assistant over a **fixed local set of 10-K

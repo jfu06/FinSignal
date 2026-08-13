@@ -1,0 +1,4 @@
+# Hugging Face Spaces installs from the repo-root requirements.txt.
+# Prefer CPU torch wheels (Spaces free tier is CPU-only; avoids CUDA bloat).
+--extra-index-url https://download.pytorch.org/whl/cpu
+-r backend/requirements.txt
