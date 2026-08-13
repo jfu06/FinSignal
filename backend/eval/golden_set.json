@@ -1,0 +1,245 @@
+{
+  "_comment": "Phase-1 mini golden set (design-doc §5): 30 cases — 25 narrative QA pairs whose expected_chunk_id/snippet were manually verified against the ingested corpus, plus 5 numeric-boundary cases that must get the 'not yet supported' reply. Grows toward the 30-50 target (decisions.md).",
+  "cases": [
+    {
+      "case_id": "gs01",
+      "kind": "narrative",
+      "ticker": "AAPL",
+      "question": "Which of Apple's geographic segments grew net sales in fiscal 2025, and did any decline?",
+      "expected_answer_snippet": "Greater China",
+      "expected_chunk_id": "AAPL_10K_2025_0086"
+    },
+    {
+      "case_id": "gs02",
+      "kind": "narrative",
+      "ticker": "AAPL",
+      "question": "苹果通过哪些直接和间接渠道销售它的产品和服务？",
+      "expected_answer_snippet": "零售",
+      "expected_chunk_id": "AAPL_10K_2025_0009"
+    },
+    {
+      "case_id": "gs03",
+      "kind": "narrative",
+      "ticker": "AAPL",
+      "question": "What share repurchase programs did Apple announce in May 2024 and May 2025?",
+      "expected_answer_snippet": "110",
+      "expected_chunk_id": "AAPL_10K_2025_0082"
+    },
+    {
+      "case_id": "gs04",
+      "kind": "narrative",
+      "ticker": "AAPL",
+      "question": "苹果在风险因素中如何描述毛利率的波动？",
+      "expected_answer_snippet": "毛利率",
+      "expected_chunk_id": "AAPL_10K_2025_0065"
+    },
+    {
+      "case_id": "gs05",
+      "kind": "narrative",
+      "ticker": "MSFT",
+      "question": "What is Azure and what does it enable customers to do?",
+      "expected_answer_snippet": "cloud",
+      "expected_chunk_id": "MSFT_10K_2026_0016"
+    },
+    {
+      "case_id": "gs06",
+      "kind": "narrative",
+      "ticker": "MSFT",
+      "question": "What consequences of cyberattacks and security vulnerabilities does Microsoft warn about?",
+      "expected_answer_snippet": "reputation",
+      "expected_chunk_id": "MSFT_10K_2026_0053"
+    },
+    {
+      "case_id": "gs07",
+      "kind": "narrative",
+      "ticker": "MSFT",
+      "question": "Who does Microsoft's Xbox and cloud gaming business compete with?",
+      "expected_answer_snippet": "gaming",
+      "expected_chunk_id": "MSFT_10K_2026_0025"
+    },
+    {
+      "case_id": "gs08",
+      "kind": "narrative",
+      "ticker": "TSLA",
+      "question": "Which consumer vehicle models does Tesla currently manufacture, and how does it position each one?",
+      "expected_answer_snippet": "Cybertruck",
+      "expected_chunk_id": "TSLA_10K_2026_0007"
+    },
+    {
+      "case_id": "gs09",
+      "kind": "narrative",
+      "ticker": "TSLA",
+      "question": "What are Tesla's energy storage products and how are they sold?",
+      "expected_answer_snippet": "Megapack",
+      "expected_chunk_id": "TSLA_10K_2026_0009"
+    },
+    {
+      "case_id": "gs10",
+      "kind": "narrative",
+      "ticker": "TSLA",
+      "question": "特斯拉在 10-K 中如何描述自己与人工智能（AI）的关系和定位？",
+      "expected_answer_snippet": "AI",
+      "expected_chunk_id": "TSLA_10K_2026_0010"
+    },
+    {
+      "case_id": "gs11",
+      "kind": "numeric_boundary",
+      "ticker": "AAPL",
+      "question": "苹果过去三年营收的 CAGR 是多少？",
+      "expected_answer_snippet": null,
+      "expected_chunk_id": null
+    },
+    {
+      "case_id": "gs12",
+      "kind": "numeric_boundary",
+      "ticker": "MSFT",
+      "question": "Calculate Microsoft's average revenue growth rate over the last three years.",
+      "expected_answer_snippet": null,
+      "expected_chunk_id": null
+    },
+    {
+      "case_id": "gs13",
+      "kind": "narrative",
+      "ticker": "AAPL",
+      "question": "What does Apple disclose about components obtained from single or limited sources?",
+      "expected_answer_snippet": "single",
+      "expected_chunk_id": "AAPL_10K_2025_0012"
+    },
+    {
+      "case_id": "gs14",
+      "kind": "narrative",
+      "ticker": "AAPL",
+      "question": "What risks does Apple disclose about the confidential customer information it uses and stores?",
+      "expected_answer_snippet": "confidential",
+      "expected_chunk_id": "AAPL_10K_2025_0044"
+    },
+    {
+      "case_id": "gs15",
+      "kind": "narrative",
+      "ticker": "AAPL",
+      "question": "How could investigations into Apple's technology-industry business partners affect Apple?",
+      "expected_answer_snippet": "commercial relationships",
+      "expected_chunk_id": "AAPL_10K_2025_0059"
+    },
+    {
+      "case_id": "gs16",
+      "kind": "narrative",
+      "ticker": "AAPL",
+      "question": "What drove the change in Apple's products gross margin in fiscal 2025?",
+      "expected_answer_snippet": "tariff",
+      "expected_chunk_id": "AAPL_10K_2025_0088"
+    },
+    {
+      "case_id": "gs17",
+      "kind": "narrative",
+      "ticker": "AAPL",
+      "question": "Why did Apple's selling, general and administrative expenses grow in 2025?",
+      "expected_answer_snippet": "headcount",
+      "expected_chunk_id": "AAPL_10K_2025_0089"
+    },
+    {
+      "case_id": "gs18",
+      "kind": "narrative",
+      "ticker": "MSFT",
+      "question": "What does Microsoft say about the investments required by its cloud and AI strategy?",
+      "expected_answer_snippet": "investments",
+      "expected_chunk_id": "MSFT_10K_2026_0046"
+    },
+    {
+      "case_id": "gs19",
+      "kind": "narrative",
+      "ticker": "MSFT",
+      "question": "What risks does Microsoft disclose about acquisitions, joint ventures, and strategic alliances?",
+      "expected_answer_snippet": "alliances",
+      "expected_chunk_id": "MSFT_10K_2026_0052"
+    },
+    {
+      "case_id": "gs20",
+      "kind": "narrative",
+      "ticker": "MSFT",
+      "question": "Where is Microsoft's common stock traded and under what symbol?",
+      "expected_answer_snippet": "NASDAQ",
+      "expected_chunk_id": "MSFT_10K_2026_0116"
+    },
+    {
+      "case_id": "gs21",
+      "kind": "narrative",
+      "ticker": "MSFT",
+      "question": "What sustainability goals has Microsoft announced for 2030?",
+      "expected_answer_snippet": "carbon negative",
+      "expected_chunk_id": "MSFT_10K_2026_0009"
+    },
+    {
+      "case_id": "gs22",
+      "kind": "narrative",
+      "ticker": "MSFT",
+      "question": "How does Microsoft describe LinkedIn's business and offerings?",
+      "expected_answer_snippet": "professionals",
+      "expected_chunk_id": "MSFT_10K_2026_0013"
+    },
+    {
+      "case_id": "gs23",
+      "kind": "narrative",
+      "ticker": "TSLA",
+      "question": "What solar energy products does Tesla manufacture?",
+      "expected_answer_snippet": "Solar Roof",
+      "expected_chunk_id": "TSLA_10K_2026_0013"
+    },
+    {
+      "case_id": "gs24",
+      "kind": "narrative",
+      "ticker": "TSLA",
+      "question": "How does Tesla describe its Supercharger network?",
+      "expected_answer_snippet": "Supercharger",
+      "expected_chunk_id": "TSLA_10K_2026_0017"
+    },
+    {
+      "case_id": "gs25",
+      "kind": "narrative",
+      "ticker": "TSLA",
+      "question": "What vehicle financing arrangements does Tesla offer?",
+      "expected_answer_snippet": "leasing",
+      "expected_chunk_id": "TSLA_10K_2026_0021"
+    },
+    {
+      "case_id": "gs26",
+      "kind": "narrative",
+      "ticker": "TSLA",
+      "question": "特斯拉有哪两个报告分部？各自包含哪些业务？",
+      "expected_answer_snippet": "汽车",
+      "expected_chunk_id": "TSLA_10K_2026_0006"
+    },
+    {
+      "case_id": "gs27",
+      "kind": "narrative",
+      "ticker": "TSLA",
+      "question": "特斯拉在关键人员依赖方面披露了什么风险？",
+      "expected_answer_snippet": "Musk",
+      "expected_chunk_id": "TSLA_10K_2026_0072"
+    },
+    {
+      "case_id": "gs28",
+      "kind": "numeric_boundary",
+      "ticker": "TSLA",
+      "question": "特斯拉汽车业务和储能业务的营收合计是多少？",
+      "expected_answer_snippet": null,
+      "expected_chunk_id": null
+    },
+    {
+      "case_id": "gs29",
+      "kind": "numeric_boundary",
+      "ticker": "AAPL",
+      "question": "What is the ratio of Apple's services revenue to products revenue?",
+      "expected_answer_snippet": null,
+      "expected_chunk_id": null
+    },
+    {
+      "case_id": "gs30",
+      "kind": "numeric_boundary",
+      "ticker": "MSFT",
+      "question": "微软过去五年的平均研发费用是多少？",
+      "expected_answer_snippet": null,
+      "expected_chunk_id": null
+    }
+  ]
+}
