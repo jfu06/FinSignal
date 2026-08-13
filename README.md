@@ -181,9 +181,15 @@ the block above is a copy for convenience.
 
 ## Deploying publicly
 
-The app runs anywhere Streamlit runs (Hugging Face Spaces recommended: free
-tier fits torch + the local embedding model). All config is env-driven — set
-`DATABASE_URL` and `ANTHROPIC_API_KEY` as platform secrets, no code changes.
+All config is env-driven — set `DATABASE_URL` and `ANTHROPIC_API_KEY` as
+platform secrets, no code changes. Two supported paths:
+
+- **Streamlit Community Cloud** (free): connect the GitHub repo, main file
+  `backend/ui/app.py`, Python 3.11 (`runtime.txt`), paste secrets in the app
+  settings. Root `requirements.txt` pulls in `backend/requirements.txt` with
+  CPU torch wheels.
+- **Any container host** (HF Spaces PRO / Railway / Fly / Render): the root
+  `Dockerfile` serves the UI on port 7860.
 
 **Before exposing to the internet, activate the cost guardrails** (inactive by
 default for local dev):
