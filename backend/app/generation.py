@@ -121,13 +121,24 @@ def generate_answer(
     payload: AnswerPayload | None = None
     last_problem = ""
     for attempt in range(2):  # one retry on truncated/invalid tool output
+        attempt_msg = user_msg
+        if attempt == 1:
+            # A verbatim retry tends to repeat the same malformed shape —
+            # steer the second attempt with an explicit format correction.
+            attempt_msg += (
+                "\n\nIMPORTANT: your previous record_answer call was "
+                "malformed. Call it again with EXACTLY these top-level "
+                'fields: "summary" (string) and "claims" (array of objects, '
+                'each with "text", "cited_chunk_ids", "kind"). No other '
+                "top-level keys, no wrapper objects, no JSON-encoded strings."
+            )
         response = client.messages.create(
             model=settings.llm_model,
             max_tokens=3000,  # 3-6 one-sentence claims fit comfortably
             system=_SYSTEM,
             tools=[_RECORD_ANSWER_TOOL],
             tool_choice={"type": "tool", "name": "record_answer"},
-            messages=[{"role": "user", "content": user_msg}],
+            messages=[{"role": "user", "content": attempt_msg}],
         )
         tool_use = next((b for b in response.content if b.type == "tool_use"), None)
         raw_candidate = tool_use.input if tool_use is not None else None

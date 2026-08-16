@@ -26,6 +26,16 @@ class TestAnswerPayload:
             {"parameter": {"summary": "s", "claims": [GOOD_CLAIM]}})
         assert p is not None and len(p.claims) == 1
 
+    def test_envelope_with_claims_array_under_arbitrary_key(self):
+        # Observed in production: {"parameter name": [ ...claims... ]}
+        p = AnswerPayload.from_tool_input({"parameter name": [GOOD_CLAIM]})
+        assert p is not None
+        assert len(p.claims) == 1 and p.claims[0].cited_chunk_ids == ["c1"]
+
+    def test_envelope_with_json_string_array(self):
+        p = AnswerPayload.from_tool_input({"input": json.dumps([GOOD_CLAIM])})
+        assert p is not None and len(p.claims) == 1
+
     def test_envelope_with_json_string(self):
         raw = {"input": json.dumps({"summary": "s", "claims": [GOOD_CLAIM]})}
         p = AnswerPayload.from_tool_input(raw)

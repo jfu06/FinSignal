@@ -61,14 +61,19 @@ class AnswerPayload(BaseModel):
         if not isinstance(data, dict):
             raise ValueError("tool input is not an object")
 
-        # Single-key envelope: {"parameter": {...}} / {"input": "...json..."}
+        # Single-key envelope: {"parameter": {...}}, {"input": "...json..."},
+        # or the whole claims ARRAY under an arbitrary key
+        # ({"parameter name": [ {...}, ... ]} — observed in production).
         if "claims" not in data and len(data) == 1:
             inner = next(iter(data.values()))
             if isinstance(inner, str):
                 inner = json.loads(inner)  # raises -> unsalvageable
-            if not isinstance(inner, dict):
-                raise ValueError("envelope does not contain an object")
-            data = inner
+            if isinstance(inner, list):
+                data = {"summary": "", "claims": inner}
+            elif isinstance(inner, dict):
+                data = inner
+            else:
+                raise ValueError("envelope does not contain an object or list")
 
         claims = data.get("claims")
         if isinstance(claims, str):

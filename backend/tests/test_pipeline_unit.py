@@ -46,6 +46,10 @@ class TestGenerateAnswer:
             "q1", "question", [make_chunk()], settings=make_settings(tmp_path))
         assert len(claims) == 1
         assert len(FakeAnthropic.calls) == 2
+        # the retry must carry the explicit format correction
+        retry_prompt = FakeAnthropic.calls[1]["messages"][0]["content"]
+        assert "previous record_answer call was malformed" in retry_prompt
+        assert "malformed" not in FakeAnthropic.calls[0]["messages"][0]["content"]
 
     def test_flattened_single_claim_salvaged(self, tmp_path):
         # Observed failure mode: model flattens ONE claim to the top level.
