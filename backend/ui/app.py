@@ -18,8 +18,12 @@ Run (from backend/):
 from __future__ import annotations
 
 import hmac
+import html as html_lib
 import json
 import sys
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import streamlit as st
@@ -37,6 +41,47 @@ from app.smoke_eval import load_smoke_result, run_smoke_eval  # noqa: E402
 from app.usage import daily_budget_left  # noqa: E402
 
 st.set_page_config(page_title="FinSignal", page_icon="📑", layout="wide")
+
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap');
+html, body, [data-testid="stAppViewContainer"] * {
+  font-family: 'Inter', -apple-system, 'PingFang SC', 'Noto Sans SC', sans-serif;
+}
+code, pre, .fs-mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+/* the blanket font override must NOT catch Streamlit's icon font */
+[data-testid="stIconMaterial"], .material-icons {
+  font-family: 'Material Symbols Rounded' !important;
+}
+
+.fs-brand { font-size: 1.65rem; font-weight: 700; letter-spacing: -0.02em; }
+.fs-brand span { color: #0E7A6E; }
+.fs-tagline { color: #5D6771; font-size: 0.86rem; line-height: 1.45; margin-top: 2px; }
+
+.fs-badge {
+  display: inline-block; font-size: 0.74rem; font-weight: 600;
+  padding: 3px 10px; border-radius: 99px; margin: 0 6px 10px 0;
+  letter-spacing: 0.01em;
+}
+.fs-badge-num { background: #F5EBDD; color: #8A5210; }
+.fs-badge-doc { background: #E4F1EF; color: #0E6A60; }
+
+.fs-num {
+  display: flex; gap: 10px; align-items: baseline;
+  background: #FBF6EE; border: 1px solid #EAD9BE; border-left: 3px solid #C08A3E;
+  border-radius: 8px; padding: 10px 14px; margin: 4px 0 2px;
+  font-size: 0.95rem; font-weight: 500;
+}
+
+.fs-claim {
+  border: 1px solid #DDE3DD; border-left: 3px solid #2F7D4F;
+  border-radius: 8px; padding: 10px 14px; margin: 8px 0 2px;
+  background: #FFFFFF; font-size: 0.93rem; line-height: 1.5;
+}
+.fs-claim.warn { border-left-color: #C99A3B; background: #FDFBF4; }
+.fs-claim-meta { color: #75808A; font-size: 0.76rem; margin-top: 6px; }
+</style>
+""", unsafe_allow_html=True)
 
 EVAL_COVERED = {"AAPL", "MSFT", "TSLA"}  # tickers the offline golden set covers
 
@@ -84,8 +129,14 @@ def _smoke_button(label: str, key: str, target: str) -> None:
 
 # ----------------------------- sidebar -----------------------------------
 with st.sidebar:
-    st.title("📑 FinSignal")
-    st.caption("Verifiable, citation-grounded 10-K Q&A — Phase 1 (RAG line)")
+    st.markdown(
+        '<div class="fs-brand">Fin<span>Signal</span></div>'
+        '<div class="fs-tagline">SEC-filings Q&A you can check. Numbers are '
+        'computed from official XBRL data — never written by an LLM. Every '
+        'written claim is verified against the filing.</div>',
+        unsafe_allow_html=True,
+    )
+    st.write("")
     ticker = st.selectbox("Company (ticker)", tickers())
 
     if ticker not in EVAL_COVERED:
@@ -187,26 +238,44 @@ def render_report(report: dict, key: str) -> None:
         )
         return
 
-    # Verified figures (Phase-2 numeric line): deterministic math over
-    # official XBRL filings — every number links to its SEC filing.
+    # Route badge: sets latency expectations and shows WHERE the answer
+    # came from (computed vs read) — the product's core differentiation.
+    has_numeric = bool(report.get("numeric"))
+    has_claims = bool(report.get("claims"))
+    badges = ""
+    if has_numeric:
+        badges += ('<span class="fs-badge fs-badge-num">🔢 Computed · '
+                   'official SEC XBRL data · zero-LLM math</span>')
+    if has_claims or not has_numeric:
+        badges += ('<span class="fs-badge fs-badge-doc">📄 From the filing · '
+                   'every claim verified</span>')
+    st.markdown(badges, unsafe_allow_html=True)
+
+    # Verified figures (numeric line): deterministic math over official
+    # XBRL filings — every number links to its SEC filing.
     for r in report.get("numeric", []):
-        st.info(f"🔢 {r['text']}")
+        st.markdown(
+            f'<div class="fs-num"><span>🔢</span>'
+            f'<span>{html_lib.escape(r["text"])}</span></div>',
+            unsafe_allow_html=True,
+        )
         links = " · ".join(
             f"[{s['form']} {s['accn']}]({s['url']})" for s in r["sources"][:3]
         )
         if links:
-            st.caption(f"Official filing data (deterministic, no LLM): {links}")
+            st.caption(f"Source: {links}")
 
     if report["summary"] and not (report.get("numeric")
                                   and not report["claims"]):
         st.markdown(report["summary"])
     ok_claims = [c for c in report["claims"] if not c["unverified"]]
     warn_claims = [c for c in report["claims"] if c["unverified"]]
-    st.caption(
-        f"{len(report['claims'])} claims · {len(ok_claims)} verified · "
-        f"{len(warn_claims)} unverified · unsupported rate "
-        f"{report['unsupported_rate']:.0%} · {report.get('latency_s', 0):.0f}s"
-    )
+    if report["claims"]:
+        st.caption(
+            f"{len(report['claims'])} claims · {len(ok_claims)} verified · "
+            f"{len(warn_claims)} unverified · unsupported rate "
+            f"{report['unsupported_rate']:.0%} · {report.get('latency_s', 0):.0f}s"
+        )
 
     for c in ok_claims:
         render_claim(c)
@@ -250,17 +319,20 @@ def render_report(report: dict, key: str) -> None:
 
 
 def render_claim(c: dict) -> None:
-    box = st.warning if c["unverified"] else st.success
     kind_badge = "🚩 Risk" if c["kind"] == "risk" else "💡 Insight"
     verified_badge = "⚠️ Unverified" if c["unverified"] else "✅ Verified"
-    box(f"{c['text']}")
     meta = f"{kind_badge} · {verified_badge} · credibility {c['credibility']:.1f}"
     span = c.get("span_overlap") or {}
     if span.get("flagged"):
         meta += " · ⚑ figures not found verbatim in citations — review advised"
     elif span.get("number_match") == 1.0:
         meta += " · 🔢 figures match citations"
-    st.caption(meta)
+    cls = "fs-claim warn" if c["unverified"] else "fs-claim"
+    st.markdown(
+        f'<div class="{cls}">{html_lib.escape(c["text"])}'
+        f'<div class="fs-claim-meta">{meta}</div></div>',
+        unsafe_allow_html=True,
+    )
     if c["unverified"] and c.get("judge_reason"):
         st.caption(f"Why unverified: {c['judge_reason']}")
     for cite in c["citations"]:
@@ -290,6 +362,83 @@ def render_digest(digest: dict, key: str) -> None:
         render_report(sec["report"], key=sec["report"]["query_id"])
 
 
+# Map pipeline events (jsonl log) to user-facing progress-stage labels.
+_STAGES = [
+    ("routed",          "🧭 Question routed"),
+    ("retrieval",       "🔍 Searching the filing…"),
+    ("assess",          "🤔 Checking whether the evidence suffices…"),
+    ("generation",      "✍️ Writing the answer — every claim must cite its source…"),
+    ("judge",           "🧑‍⚖️ Cross-checking every claim against the cited text…"),
+    ("regeneration",    "♻️ A claim contradicted the filing — regenerating once…"),
+]
+
+
+def _stage_for(event: dict) -> str | None:
+    name = event.get("event", "")
+    stage = event.get("stage", "")
+    if name == "routed":
+        route = event.get("route", "narrative")
+        return ("🧭 Routed → numeric: computing from official filing data…"
+                if route == "numeric" else f"🧭 Routed → {route}")
+    if name in ("retrieval", "retrieval_refined"):
+        return "🔍 Searching the filing…"
+    if name == "regeneration_triggered":
+        return "♻️ A claim contradicted the filing — regenerating once…"
+    if name == "llm_call":
+        for key, label in _STAGES:
+            if stage == key:
+                return label
+    return None
+
+
+def answer_with_progress(question: str, tk: str) -> dict:
+    """Run answer_question in a thread while tailing the event log so the
+    user sees real pipeline stages instead of a blind spinner. Any failure
+    of the progress machinery falls back to a plain blocking call."""
+
+    qid = f"ui{uuid.uuid4().hex[:8]}"
+    log_path = settings().log_path
+    try:
+        offset = log_path.stat().st_size if log_path.exists() else 0
+    except OSError:
+        return answer_question(question, tk, settings=settings())
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        fut = pool.submit(answer_question, question, tk,
+                          settings=settings(), query_id=qid)
+        with st.status("🧭 Routing the question…", expanded=True) as s:
+            seen: set[str] = set()
+            try:
+                while not fut.done():
+                    time.sleep(0.4)
+                    try:
+                        with open(log_path, encoding="utf-8") as fh:
+                            fh.seek(offset)
+                            new_text = fh.read()
+                            offset = fh.tell()
+                    except OSError:
+                        continue
+                    for line in new_text.splitlines():
+                        try:
+                            ev = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        if str(ev.get("query_id") or "").startswith(qid):
+                            label = _stage_for(ev)
+                            if label and label not in seen:
+                                seen.add(label)
+                                st.write(label)
+                                s.update(label=label)
+            except Exception:  # noqa: BLE001 — progress is cosmetic
+                pass
+            report = fut.result()  # re-raises pipeline errors to the caller
+            s.update(
+                label=f"Done in {report.get('latency_s', 0):.0f}s",
+                state="complete", expanded=False,
+            )
+    return report
+
+
 # --- replay the conversation ---
 for i, turn in enumerate(history):
     with st.chat_message("user"):
@@ -306,11 +455,20 @@ for i, turn in enumerate(history):
 
 if not history:
     st.caption(
-        "Ask anything about the selected company's 10-K — e.g. "
-        "\u201cWhat drove revenue growth last year? Any risk factors?\u201d "
-        "Follow-up questions are welcome; each answer is claim-checked "
-        "against the filing."
+        "Ask anything about a company's 10-K — any language, follow-ups "
+        "welcome. Try one of these:"
     )
+    _EXAMPLES = [
+        "What was Apple's FY2025 revenue, and how fast is it growing?",
+        "What are Tesla's biggest risk factors?",
+        "How much does Microsoft spend on R&D, and why?",
+        "英伟达最近一年营收增长的驱动因素是什么？",
+    ]
+    cols = st.columns(2)
+    for i, q in enumerate(_EXAMPLES):
+        if cols[i % 2].button(q, key=f"ex_{i}", use_container_width=True):
+            st.session_state["queued_q"] = q
+            st.rerun()
 
 # --- one-click digest (cold-start entry point) ---
 if st.button(f"📊 Generate {ticker} annual report digest (~2 min)",
@@ -341,6 +499,8 @@ if st.button(f"📊 Generate {ticker} annual report digest (~2 min)",
                     st.error(f"Digest failed, please retry. ({exc})")
 
 prompt = st.chat_input(f"Ask about {ticker} or ANY company… (any language, follow-ups OK)")
+if not prompt:
+    prompt = st.session_state.pop("queued_q", None)
 if prompt and prompt.strip():
     prompt = prompt.strip()
     # --- usage guardrails: per-session limit + global daily budget ---
@@ -358,42 +518,37 @@ if prompt and prompt.strip():
         with st.chat_message("user"):
             st.markdown(f"**[{ticker}]** {prompt}")
         with st.chat_message("assistant"):
-            with st.spinner("Retrieve → generate → batch-verify… (typically < 60 s)"):
-                turn: dict = {"question": prompt, "ticker": ticker}
-                try:
-                    qa_history = []
-                    for t in history:
-                        if t.get("digest"):
-                            qa_history.append(
-                                {"question": t["question"],
-                                 "summary": t.get("summary_for_context", "")})
-                        elif t.get("report") and t["report"].get("supported", True):
-                            qa_history.append(
-                                {"question": t["question"],
-                                 "summary": t["report"]["summary"]})
-                    standalone = condense_followup(
-                        prompt, qa_history, settings=settings()
-                    )
-                    turn["standalone"] = standalone
-                    report = answer_question(
-                        standalone, ticker, settings=settings()
-                    )
-                    if report.get("needs_onboarding"):
-                        # Question mentions a company we don't have yet:
-                        # onboard it inline, then answer for real.
-                        tk = report["needs_onboarding"]
-                        st.write(f"➕ {tk} isn't in the corpus — adding it…")
-                        ensure_ticker(tk, settings=settings(),
-                                      progress=st.write)
-                        tickers.clear()
-                        turn["ticker"] = tk
-                        report = answer_question(
-                            standalone, tk, settings=settings()
-                        )
-                    turn["report"] = report
-                except PipelineError as exc:
-                    turn["error"] = f"Invalid input: {exc}"
-                except Exception as exc:  # noqa: BLE001
-                    turn["error"] = f"Analysis failed, please retry. ({exc})"
+            turn: dict = {"question": prompt, "ticker": ticker}
+            try:
+                qa_history = []
+                for h in history:
+                    if h.get("digest"):
+                        qa_history.append(
+                            {"question": h["question"],
+                             "summary": h.get("summary_for_context", "")})
+                    elif h.get("report") and h["report"].get("supported", True):
+                        qa_history.append(
+                            {"question": h["question"],
+                             "summary": h["report"]["summary"]})
+                standalone = condense_followup(
+                    prompt, qa_history, settings=settings()
+                )
+                turn["standalone"] = standalone
+                report = answer_with_progress(standalone, ticker)
+                if report.get("needs_onboarding"):
+                    # Question mentions a company we don't have yet:
+                    # onboard it inline, then answer for real.
+                    tk = report["needs_onboarding"]
+                    st.write(f"➕ {tk} isn't in the corpus — adding it…")
+                    ensure_ticker(tk, settings=settings(),
+                                  progress=st.write)
+                    tickers.clear()
+                    turn["ticker"] = tk
+                    report = answer_with_progress(standalone, tk)
+                turn["report"] = report
+            except PipelineError as exc:
+                turn["error"] = f"Invalid input: {exc}"
+            except Exception as exc:  # noqa: BLE001
+                turn["error"] = f"Analysis failed, please retry. ({exc})"
         history.append(turn)
         st.rerun()

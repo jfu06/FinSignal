@@ -247,10 +247,10 @@
       "ticker": "AAPL",
       "question": "What was Apple's total revenue in fiscal year 2025?",
       "expected_substrings": [
-        "416.2"
+        "416.16"
       ],
       "expected_accn": "0000320193-25-000079",
-      "expected_answer_snippet": "416.2",
+      "expected_answer_snippet": "416.16",
       "expected_chunk_id": null
     },
     {
@@ -271,10 +271,10 @@
       "ticker": "AAPL",
       "question": "What was Apple's Q4 revenue in fiscal 2025?",
       "expected_substrings": [
-        "102.5"
+        "102.47"
       ],
       "expected_accn": null,
-      "expected_answer_snippet": "102.5",
+      "expected_answer_snippet": "102.47",
       "expected_chunk_id": null
     },
     {

@@ -35,9 +35,27 @@ from app.config import ConfigError, Settings, get_settings
 from app.llm import anthropic_client, openai_client
 from app.pipeline import answer_question
 
-from .benchmark_data import BenchCase, load_benchmark
+from .benchmark_data import RAW_DIR, BenchCase, load_benchmark
 
 REPORT_PATH = Path(__file__).resolve().parent / "benchmark_report.json"
+
+
+def build_scopes(docs) -> dict[str, dict]:
+    """doc_name -> {"cik", "accn"} for oracle-doc numeric execution.
+
+    The accession pins XBRL lookups to figures as printed in that exact
+    filing. Docs whose fetch metadata is missing get no scope (narrative-only,
+    the pre-numeric behavior).
+    """
+
+    scopes: dict[str, dict] = {}
+    for doc in docs:
+        meta_path = RAW_DIR / f"{doc.doc_name}.meta.json"
+        if meta_path.exists():
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            scopes[doc.doc_name] = {"cik": int(doc.cik),
+                                    "accn": meta["accession"]}
+    return scopes
 
 _GRADE_TOOL = {
     "name": "record_grade",
@@ -136,7 +154,8 @@ def grade_answer(case: BenchCase, model_answer: str,
     return {"grade": grade, "reason": str(raw.get("reason", "")).strip()}
 
 
-def run_case(case: BenchCase, settings: Settings) -> dict:
+def run_case(case: BenchCase, settings: Settings,
+             scope: dict | None = None) -> dict:
     """Answer + grade one case; one retry on pipeline crash."""
 
     ticker = case.doc_name.split("_")[0]
@@ -147,6 +166,7 @@ def run_case(case: BenchCase, settings: Settings) -> dict:
                 case.question, ticker, settings=settings,
                 query_id=f"fb_{case.financebench_id}",
                 doc_id=case.doc_name,
+                numeric_scope=scope,
             )
             break
         except Exception as exc:  # noqa: BLE001 — record, don't kill the run
@@ -215,7 +235,8 @@ def main() -> int:
     args = parser.parse_args()
 
     settings = get_settings()
-    _, cases = load_benchmark()
+    docs, cases = load_benchmark()
+    scopes = build_scopes(docs)
     if args.types:
         cases = [c for c in cases if c.question_type in args.types]
     if args.limit:
@@ -226,7 +247,10 @@ def main() -> int:
     results: list[dict] = []
     started = time.monotonic()
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = {pool.submit(run_case, c, settings): c for c in cases}
+        futures = {
+            pool.submit(run_case, c, settings, scopes.get(c.doc_name)): c
+            for c in cases
+        }
         for i, future in enumerate(as_completed(futures), 1):
             r = future.result()
             results.append(r)

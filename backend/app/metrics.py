@@ -149,26 +149,45 @@ def _cik(ticker: str) -> int:
 
 
 def _fetch(cik: int, taxonomy: str, tag: str, unit: str,
-           settings: Settings) -> list[Fact]:
+           settings: Settings, accn: str | None = None) -> list[Fact]:
     with connect(settings) as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT start_date, end_date, val, accn, form, filed
-            FROM facts_dedup
-            WHERE cik = %s AND taxonomy = %s AND tag = %s AND unit = %s
-            """,
-            (cik, taxonomy, tag, unit),
-        )
+        if accn is not None:
+            # Oracle-document mode: only figures AS PRINTED in that one filing
+            # (incl. its comparative prior periods). Must hit xbrl_facts, not
+            # facts_dedup — the dedup view keeps the LATEST filing's row per
+            # period, which usually carries a different accession.
+            cur.execute(
+                """
+                SELECT DISTINCT ON (start_date, end_date)
+                    start_date, end_date, val, accn, form, filed
+                FROM xbrl_facts
+                WHERE cik = %s AND taxonomy = %s AND tag = %s AND unit = %s
+                  AND accn = %s
+                ORDER BY start_date, end_date
+                """,
+                (cik, taxonomy, tag, unit, accn),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT start_date, end_date, val, accn, form, filed
+                FROM facts_dedup
+                WHERE cik = %s AND taxonomy = %s AND tag = %s AND unit = %s
+                """,
+                (cik, taxonomy, tag, unit),
+            )
         return [Fact(r[0], r[1], float(r[2]), r[3], r[4] or "", r[5])
                 for r in cur.fetchall()]
 
 
-def _fy_period(cik: int, fy: int, settings: Settings) -> tuple[date, date] | None:
+def _fy_period(cik: int, fy: int, settings: Settings,
+               accn: str | None = None) -> tuple[date, date] | None:
     """The company's actual fiscal period for a year, from anchor metrics."""
 
     for anchor in ("revenue", "net_income", "operating_cash_flow"):
         for taxonomy, tag in METRICS[anchor]["tags"]:
-            facts = _fetch(cik, taxonomy, tag, METRICS[anchor]["unit"], settings)
+            facts = _fetch(cik, taxonomy, tag, METRICS[anchor]["unit"],
+                           settings, accn=accn)
             point = pick_annual(facts, fy)
             if point and point.start:
                 return point.start, point.end
@@ -179,8 +198,15 @@ def _fy_period(cik: int, fy: int, settings: Settings) -> tuple[date, date] | Non
 
 
 def get_metric(ticker: str, metric: str, fy: int | None = None,
-               settings: Settings | None = None) -> MetricPoint | None:
-    """One verified number: latest annual value, or a specific fiscal year."""
+               settings: Settings | None = None,
+               cik: int | None = None,
+               accn: str | None = None) -> MetricPoint | None:
+    """One verified number: latest annual value, or a specific fiscal year.
+
+    ``cik`` bypasses ticker resolution (benchmark companies use display
+    names, some delisted); ``accn`` restricts to figures as printed in one
+    specific filing (oracle-document mode).
+    """
 
     settings = settings or get_settings()
     spec = METRICS.get(metric)
@@ -188,15 +214,16 @@ def get_metric(ticker: str, metric: str, fy: int | None = None,
         raise MetricError(
             f"Unknown metric {metric!r}. Available: {sorted(METRICS)}")
     ticker = ticker.strip().upper()
-    cik = _cik(ticker)
+    if cik is None:
+        cik = _cik(ticker)
 
     anchor_end: date | None = None
     if spec["kind"] == "instant":
-        period = _fy_period(cik, fy, settings) if fy else None
+        period = _fy_period(cik, fy, settings, accn=accn) if fy else None
         anchor_end = period[1] if period else None
 
     for taxonomy, tag in spec["tags"]:  # §5.1 priority fallback, per request
-        facts = _fetch(cik, taxonomy, tag, spec["unit"], settings)
+        facts = _fetch(cik, taxonomy, tag, spec["unit"], settings, accn=accn)
         point = (pick_annual(facts, fy) if spec["kind"] == "duration"
                  else pick_instant(facts, anchor_end, fy))
         if point is not None:
@@ -211,46 +238,56 @@ def get_metric(ticker: str, metric: str, fy: int | None = None,
 
 
 def get_series(ticker: str, metric: str, years: int = 5,
-               settings: Settings | None = None) -> list[MetricPoint]:
+               settings: Settings | None = None,
+               cik: int | None = None,
+               accn: str | None = None) -> list[MetricPoint]:
     """Last N fiscal years, stitched across tag migrations (§5.1)."""
 
     settings = settings or get_settings()
-    latest = get_metric(ticker, metric, settings=settings)
+    latest = get_metric(ticker, metric, settings=settings, cik=cik, accn=accn)
     if latest is None:
         return []
     out = [latest]
     for fy in range(latest.fy - 1, latest.fy - years, -1):
-        p = get_metric(ticker, metric, fy=fy, settings=settings)
+        p = get_metric(ticker, metric, fy=fy, settings=settings,
+                       cik=cik, accn=accn)
         if p is not None:
             out.append(p)
     return out
 
 
 def yoy_growth(ticker: str, metric: str, fy: int | None = None,
-               settings: Settings | None = None
+               settings: Settings | None = None,
+               cik: int | None = None,
+               accn: str | None = None
                ) -> tuple[float, MetricPoint, MetricPoint] | None:
     """(growth_fraction, current_point, prior_point) — computed in code."""
 
     settings = settings or get_settings()
-    cur = get_metric(ticker, metric, fy=fy, settings=settings)
+    cur = get_metric(ticker, metric, fy=fy, settings=settings,
+                     cik=cik, accn=accn)
     if cur is None:
         return None
-    prev = get_metric(ticker, metric, fy=cur.fy - 1, settings=settings)
+    prev = get_metric(ticker, metric, fy=cur.fy - 1, settings=settings,
+                      cik=cik, accn=accn)
     if prev is None or prev.value == 0:
         return None
     return (cur.value - prev.value) / abs(prev.value), cur, prev
 
 
 def cagr(ticker: str, metric: str, years: int,
-         settings: Settings | None = None
+         settings: Settings | None = None,
+         cik: int | None = None,
+         accn: str | None = None
          ) -> tuple[float, MetricPoint, MetricPoint] | None:
     """N-year compound annual growth rate between two verified endpoints."""
 
     settings = settings or get_settings()
-    end = get_metric(ticker, metric, settings=settings)
+    end = get_metric(ticker, metric, settings=settings, cik=cik, accn=accn)
     if end is None:
         return None
-    start = get_metric(ticker, metric, fy=end.fy - years, settings=settings)
+    start = get_metric(ticker, metric, fy=end.fy - years, settings=settings,
+                       cik=cik, accn=accn)
     if start is None or start.value <= 0 or end.value <= 0:
         return None
     return (end.value / start.value) ** (1 / years) - 1, end, start
@@ -262,11 +299,15 @@ RATIOS: dict[str, tuple[str, str]] = {
     "operating_margin": ("operating_income", "revenue"),
     "net_margin": ("net_income", "revenue"),
     "rnd_intensity": ("research_and_development", "revenue"),
+    "capex_intensity": ("capex", "revenue"),
+    "da_margin": ("depreciation_amortization", "revenue"),
 }
 
 
 def ratio(ticker: str, name: str, fy: int | None = None,
-          settings: Settings | None = None
+          settings: Settings | None = None,
+          cik: int | None = None,
+          accn: str | None = None
           ) -> tuple[float, MetricPoint, MetricPoint] | None:
     """(ratio, numerator_point, denominator_point) for a named ratio."""
 
@@ -274,29 +315,35 @@ def ratio(ticker: str, name: str, fy: int | None = None,
         raise MetricError(f"Unknown ratio {name!r}. Available: {sorted(RATIOS)}")
     settings = settings or get_settings()
     num_m, den_m = RATIOS[name]
-    den = get_metric(ticker, den_m, fy=fy, settings=settings)
+    den = get_metric(ticker, den_m, fy=fy, settings=settings,
+                     cik=cik, accn=accn)
     if den is None or den.value == 0:
         return None
-    num = get_metric(ticker, num_m, fy=den.fy, settings=settings)
+    num = get_metric(ticker, num_m, fy=den.fy, settings=settings,
+                     cik=cik, accn=accn)
     if num is None:
         return None
     return num.value / den.value, num, den
 
 
 def q4_single_quarter(ticker: str, metric: str, fy: int | None = None,
-                      settings: Settings | None = None) -> MetricPoint | None:
+                      settings: Settings | None = None,
+                      cik: int | None = None,
+                      accn: str | None = None) -> MetricPoint | None:
     """Q4 = FY − Q1 − Q2 − Q3 (§5.6: Q4 is never reported directly)."""
 
     settings = settings or get_settings()
     spec = METRICS.get(metric)
     if spec is None or spec["kind"] != "duration":
         raise MetricError(f"Q4 derivation needs a duration metric, got {metric!r}")
-    annual = get_metric(ticker, metric, fy=fy, settings=settings)
+    annual = get_metric(ticker, metric, fy=fy, settings=settings,
+                        cik=cik, accn=accn)
     if annual is None or annual.period_start is None:
         return None
-    cik = _cik(ticker)
+    if cik is None:
+        cik = _cik(ticker)
     for taxonomy, tag in spec["tags"]:
-        facts = _fetch(cik, taxonomy, tag, spec["unit"], settings)
+        facts = _fetch(cik, taxonomy, tag, spec["unit"], settings, accn=accn)
         qs = quarters_within(facts, annual.period_start, annual.period_end)
         if len(qs) == 3:
             q4 = annual.value - sum(q.val for q in qs)
@@ -309,6 +356,66 @@ def q4_single_quarter(ticker: str, metric: str, fy: int | None = None,
                 note="Q4 = FY − Q1 − Q2 − Q3 (computed; Q4 is not reported)",
             )
     return None
+
+
+# Derived metrics: multi-component formulas over registry metrics, computed
+# in code at a single consistent fiscal year (FinanceBench failure analysis:
+# quick ratio / working capital questions need subtraction, not just num/den).
+DERIVED: dict[str, dict] = {
+    "working_capital": {
+        "components": ("current_assets", "current_liabilities"),
+        "formula": lambda a, li: a - li, "unit": "USD",
+        "note": "current assets − current liabilities",
+    },
+    "current_ratio": {
+        "components": ("current_assets", "current_liabilities"),
+        "formula": lambda a, li: a / li, "unit": "x",
+        "note": "current assets / current liabilities",
+    },
+    "quick_ratio": {
+        "components": ("current_assets", "inventory", "current_liabilities"),
+        "formula": lambda a, inv, li: (a - inv) / li, "unit": "x",
+        "note": "(current assets − inventory) / current liabilities",
+    },
+    # FinanceBench's DPO definition (purchases-adjusted denominator)
+    "days_payable_outstanding": {
+        "components": ("accounts_payable", "accounts_payable@prev",
+                       "cost_of_revenue", "inventory", "inventory@prev"),
+        "formula": lambda ap, ap0, cogs, inv, inv0:
+            365 * ((ap + ap0) / 2) / (cogs + inv - inv0),
+        "unit": "days",
+        "note": "365 × avg(accounts payable) / (COGS + Δinventory)",
+    },
+}
+
+
+def derived_metric(ticker: str, name: str, fy: int | None = None,
+                   settings: Settings | None = None,
+                   cik: int | None = None,
+                   accn: str | None = None
+                   ) -> tuple[float, list[MetricPoint]] | None:
+    """(value, component_points) for a DERIVED formula, all at the same FY."""
+
+    spec = DERIVED.get(name)
+    if spec is None:
+        raise MetricError(
+            f"Unknown derived metric {name!r}. Available: {sorted(DERIVED)}")
+    settings = settings or get_settings()
+    points: list[MetricPoint] = []
+    for i, component in enumerate(spec["components"]):
+        name_part, _, suffix = component.partition("@")
+        base_fy = fy if i == 0 else points[0].fy
+        want_fy = (base_fy - 1) if suffix == "prev" and base_fy else base_fy
+        p = get_metric(ticker, name_part, fy=want_fy,
+                       settings=settings, cik=cik, accn=accn)
+        if p is None:
+            return None
+        points.append(p)
+    try:
+        value = spec["formula"](*(p.value for p in points))
+    except ZeroDivisionError:
+        return None
+    return value, points
 
 
 def compare(tickers: list[str], metric: str, fy: int | None = None,

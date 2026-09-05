@@ -23,9 +23,11 @@ from .config import Settings, get_settings
 from .llm import anthropic_client
 from .logging_utils import log_event
 from .metrics import (
+    DERIVED,
     RATIOS,
     cagr,
     compare,
+    derived_metric,
     get_metric,
     get_series,
     q4_single_quarter,
@@ -52,7 +54,8 @@ _ROUTE_TOOL = {
                     "properties": {
                         "op": {"type": "string", "enum": _OPS},
                         "metric": {"type": "string",
-                                   "enum": sorted(METRICS) + sorted(RATIOS)},
+                                   "enum": (sorted(METRICS) + sorted(RATIOS)
+                                            + sorted(DERIVED))},
                         "fy": {"type": "integer"},
                         "years": {"type": "integer"},
                         "tickers": {"type": "array",
@@ -80,18 +83,24 @@ You route questions for a financial filings QA system.
 
 - narrative: qualitative questions (drivers, risks, strategy, descriptions) —
   answered from 10-K text.
-- numeric: the answer is one or more FIGURES available in the metric registry
-  below. Emit the queries.
-- hybrid: needs both a figure AND an explanation (e.g. "how much did revenue
-  grow and why?"). Emit the numeric queries too.
+- numeric: the question asks PURELY for figures or computed values that the
+  registry ops below can fully produce. Emit the queries.
+- hybrid: needs both figures AND text (explanation, judgment, or context).
+  Emit the numeric queries too. Use hybrid — never bare numeric — when the
+  question asks a yes/no or judgment ("has debt increased?", "is it
+  capital-intensive?", "did they pay dividends?"), asks WHY, or needs a
+  multi-step custom formula the ops can't finish (emit the component values;
+  the text answer completes the computation and states the conclusion).
 
 Available metrics: {", ".join(sorted(METRICS))}
 Available ratios (use op="ratio"): {", ".join(sorted(RATIOS))}
+Derived (use op="value"): {", ".join(sorted(DERIVED))}
 
 Ops: value (one figure; fy optional), yoy (year-over-year change),
-cagr (needs years), average (mean over years), q4 (derived Q4 single
-quarter), series (multi-year trend; years optional), compare (across the
-given tickers), ratio.
+cagr (needs years), average (mean over years — works for ratios too, e.g.
+3-year average net margin: op=average, metric=net_margin, years=3, fy=the
+LAST year of the window), q4 (derived Q4 single quarter), series (multi-year
+trend; years optional), compare (across the given tickers), ratio.
 
 When the question compares companies ("A vs B", "who spends more"), you MUST
 use op="compare" with tickers listing EVERY company mentioned.\
@@ -156,13 +165,19 @@ def route_question(
 
 def _fmt(value: float, unit: str) -> str:
     if unit == "USD":
+        # Two decimals at billion scale: a $1.6B rendering of $1,577M is a
+        # 1.5% distortion — enough to fail an exact-answer comparison.
         if abs(value) >= 1e9:
-            return f"${value / 1e9:,.1f}B"
+            return f"${value / 1e9:,.2f}B"
         if abs(value) >= 1e6:
             return f"${value / 1e6:,.1f}M"
         return f"${value:,.0f}"
     if unit == "USD/shares":
         return f"${value:,.2f}"
+    if unit == "x":
+        return f"{value:,.2f}x"
+    if unit == "days":
+        return f"{value:,.1f} days"
     if unit == "shares":
         return f"{value / 1e9:,.2f}B shares" if abs(value) >= 1e9 \
             else f"{value / 1e6:,.1f}M shares"
@@ -174,8 +189,13 @@ def _src(p) -> dict:  # noqa: ANN001
             "period_end": str(p.period_end)}
 
 
-def _run_one(q: dict, default_ticker: str, settings: Settings) -> dict:
-    """Execute one structured query. Returns {ok, text, sources, ...}."""
+def _run_one(q: dict, default_ticker: str, settings: Settings,
+             scope: dict | None = None) -> dict:
+    """Execute one structured query. Returns {ok, text, sources, ...}.
+
+    ``scope`` (oracle-document mode) carries {"cik", "accn"}: figures come
+    only from that one filing, and the CIK bypasses ticker resolution.
+    """
 
     op = q["op"]
     metric = q["metric"]
@@ -183,9 +203,25 @@ def _run_one(q: dict, default_ticker: str, settings: Settings) -> dict:
         or [default_ticker]
     t = tickers[0]
     fy = q.get("fy")
+    scope = scope or {}
+    cik, accn = scope.get("cik"), scope.get("accn")
 
-    if metric in RATIOS or op == "ratio":
-        out = ratio(t, metric, fy=fy, settings=settings)
+    if metric in DERIVED:
+        out = derived_metric(t, metric, fy=fy, settings=settings,
+                             cik=cik, accn=accn)
+        if not out:
+            return {"ok": False}
+        value, pts = out
+        spec = DERIVED[metric]
+        parts = ", ".join(f"{p.metric.replace('_', ' ')} "
+                          f"{_fmt(p.value, p.unit)}" for p in pts)
+        return {"ok": True, "sources": [_src(p) for p in pts],
+                "text": f"{t} {metric.replace('_', ' ')} FY{pts[0].fy}: "
+                        f"{_fmt(value, spec['unit'])} "
+                        f"(= {spec['note']}; {parts})"}
+
+    if (metric in RATIOS or op == "ratio") and op != "average":
+        out = ratio(t, metric, fy=fy, settings=settings, cik=cik, accn=accn)
         if not out:
             return {"ok": False}
         r, num, den = out
@@ -195,7 +231,8 @@ def _run_one(q: dict, default_ticker: str, settings: Settings) -> dict:
                         f"{_fmt(den.value, den.unit)})"}
 
     if op == "yoy":
-        out = yoy_growth(t, metric, fy=fy, settings=settings)
+        out = yoy_growth(t, metric, fy=fy, settings=settings,
+                         cik=cik, accn=accn)
         if not out:
             return {"ok": False}
         g, cur, prev = out
@@ -206,7 +243,7 @@ def _run_one(q: dict, default_ticker: str, settings: Settings) -> dict:
 
     if op == "cagr":
         years = q.get("years") or 3
-        out = cagr(t, metric, years, settings=settings)
+        out = cagr(t, metric, years, settings=settings, cik=cik, accn=accn)
         if not out:
             return {"ok": False}
         g, end, start = out
@@ -217,7 +254,32 @@ def _run_one(q: dict, default_ticker: str, settings: Settings) -> dict:
 
     if op == "average":
         years = q.get("years") or 5
-        pts = get_series(t, metric, years=years, settings=settings)
+        if metric in RATIOS:
+            # mean of per-year ratios (e.g. FY2015–FY2017 average net margin)
+            first = ratio(t, metric, fy=fy, settings=settings,
+                          cik=cik, accn=accn)
+            if not first:
+                return {"ok": False}
+            per_year, sources = [], []
+            base_fy = first[2].fy
+            for y in range(base_fy, base_fy - years, -1):
+                out = ratio(t, metric, fy=y, settings=settings,
+                            cik=cik, accn=accn)
+                if out:
+                    per_year.append((y, out[0]))
+                    sources += [_src(out[1]), _src(out[2])]
+            if not per_year:
+                return {"ok": False}
+            avg = sum(r for _, r in per_year) / len(per_year)
+            detail = "; ".join(f"FY{y} {r:.1%}"
+                               for y, r in reversed(per_year))
+            return {"ok": True, "sources": sources,
+                    "text": f"{t} {metric.replace('_', ' ')} "
+                            f"{len(per_year)}-year average "
+                            f"(FY{per_year[-1][0]}–FY{per_year[0][0]}): "
+                            f"{avg:.1%} ({detail})"}
+        pts = get_series(t, metric, years=years, settings=settings,
+                         cik=cik, accn=accn)
         if not pts:
             return {"ok": False}
         avg = sum(p.value for p in pts) / len(pts)
@@ -227,7 +289,8 @@ def _run_one(q: dict, default_ticker: str, settings: Settings) -> dict:
                         f"{_fmt(avg, pts[0].unit)}"}
 
     if op == "q4":
-        p = q4_single_quarter(t, metric, fy=fy, settings=settings)
+        p = q4_single_quarter(t, metric, fy=fy, settings=settings,
+                              cik=cik, accn=accn)
         if not p:
             return {"ok": False}
         return {"ok": True, "sources": [_src(p)],
@@ -236,7 +299,8 @@ def _run_one(q: dict, default_ticker: str, settings: Settings) -> dict:
 
     if op == "series":
         years = q.get("years") or 5
-        pts = get_series(t, metric, years=years, settings=settings)
+        pts = get_series(t, metric, years=years, settings=settings,
+                         cik=cik, accn=accn)
         if not pts:
             return {"ok": False}
         trend = "; ".join(f"FY{p.fy} {_fmt(p.value, p.unit)}"
@@ -255,7 +319,7 @@ def _run_one(q: dict, default_ticker: str, settings: Settings) -> dict:
                 "text": f"{metric.replace('_', ' ')} comparison: {ranking}"}
 
     # default: op == "value"
-    p = get_metric(t, metric, fy=fy, settings=settings)
+    p = get_metric(t, metric, fy=fy, settings=settings, cik=cik, accn=accn)
     if not p:
         return {"ok": False}
     return {"ok": True, "sources": [_src(p)],
@@ -267,6 +331,7 @@ def execute_numeric(
     queries: list[dict],
     default_ticker: str,
     settings: Settings | None = None,
+    scope: dict | None = None,
 ) -> list[dict]:
     """Run all structured queries; failed ones are dropped (fail-open)."""
 
@@ -274,7 +339,7 @@ def execute_numeric(
     results = []
     for q in queries[:6]:  # sanity cap
         try:
-            r = _run_one(q, default_ticker, settings)
+            r = _run_one(q, default_ticker, settings, scope=scope)
         except Exception:  # noqa: BLE001 — one bad query must not kill the rest
             r = {"ok": False}
         if r.get("ok"):

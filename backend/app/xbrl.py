@@ -47,7 +47,9 @@ METRICS: dict[str, dict] = {
     },
     "cost_of_revenue": {
         "tags": [("us-gaap", "CostOfGoodsAndServicesSold"),
-                 ("us-gaap", "CostOfRevenue")],
+                 ("us-gaap", "CostOfRevenue"),
+                 ("us-gaap", "CostOfSales"),
+                 ("us-gaap", "CostOfGoodsSold")],
         "kind": "duration", "unit": "USD",
     },
     "gross_profit": {
@@ -103,20 +105,92 @@ METRICS: dict[str, dict] = {
                  ("us-gaap", "CommonStockSharesOutstanding")],
         "kind": "instant", "unit": "shares",
     },
+    # --- balance-sheet line items (FinanceBench failure analysis: quick/
+    # current ratio, working capital, DPO-style questions need these) ---
+    "current_assets": {
+        "tags": [("us-gaap", "AssetsCurrent")],
+        "kind": "instant", "unit": "USD",
+    },
+    "current_liabilities": {
+        "tags": [("us-gaap", "LiabilitiesCurrent")],
+        "kind": "instant", "unit": "USD",
+    },
+    "inventory": {
+        "tags": [("us-gaap", "InventoryNet"),
+                 ("us-gaap", "InventoryFinishedGoodsNetOfReserves")],
+        "kind": "instant", "unit": "USD",
+    },
+    "accounts_payable": {
+        "tags": [("us-gaap", "AccountsPayableCurrent"),
+                 ("us-gaap", "AccountsPayableTradeCurrent")],
+        "kind": "instant", "unit": "USD",
+    },
+    "accounts_receivable": {
+        "tags": [("us-gaap", "AccountsReceivableNetCurrent"),
+                 ("us-gaap", "ReceivablesNetCurrent")],
+        "kind": "instant", "unit": "USD",
+    },
+    "ppe_net": {
+        "tags": [("us-gaap", "PropertyPlantAndEquipmentNet")],
+        "kind": "instant", "unit": "USD",
+    },
+    "long_term_debt": {
+        "tags": [("us-gaap", "LongTermDebtNoncurrent"),
+                 ("us-gaap", "LongTermDebt")],
+        "kind": "instant", "unit": "USD",
+    },
+    # --- income/cash-flow items ---
+    "capex": {
+        "tags": [("us-gaap", "PaymentsToAcquirePropertyPlantAndEquipment"),
+                 ("us-gaap", "PaymentsToAcquireProductiveAssets")],
+        "kind": "duration", "unit": "USD",
+    },
+    "depreciation_amortization": {
+        "tags": [("us-gaap", "DepreciationDepletionAndAmortization"),
+                 ("us-gaap", "DepreciationAmortizationAndAccretionNet"),
+                 ("us-gaap", "Depreciation")],
+        "kind": "duration", "unit": "USD",
+    },
+    "sga_expense": {
+        "tags": [("us-gaap", "SellingGeneralAndAdministrativeExpense")],
+        "kind": "duration", "unit": "USD",
+    },
+    "interest_expense": {
+        "tags": [("us-gaap", "InterestExpense")],
+        "kind": "duration", "unit": "USD",
+    },
+    "dividends_paid": {
+        "tags": [("us-gaap", "PaymentsOfDividends"),
+                 ("us-gaap", "PaymentsOfDividendsCommonStock")],
+        "kind": "duration", "unit": "USD",
+    },
 }
 
 
-def parse_companyfacts(data: dict) -> Iterator[tuple]:
+def registry_tags() -> set[tuple[str, str]]:
+    """All (taxonomy, tag) pairs the metric registry can ever query."""
+
+    return {t for spec in METRICS.values() for t in spec["tags"]}
+
+
+def parse_companyfacts(data: dict,
+                       wanted: set[tuple[str, str]] | None = None,
+                       ) -> Iterator[tuple]:
     """Yield fact rows from a companyfacts JSON payload.
 
     Row: (cik, taxonomy, tag, unit, start, end, val, accn, fy, fp, form,
     filed, frame). Points missing mandatory fields are skipped (defensive —
-    the API is well-formed in practice).
+    the API is well-formed in practice). ``wanted`` restricts output to those
+    (taxonomy, tag) pairs — used for benchmark companies, where only the
+    metric registry's tags are ever queried and full history would be
+    millions of rows across 31 filers.
     """
 
     cik = int(data["cik"])
     for taxonomy, tags in (data.get("facts") or {}).items():
         for tag, obj in tags.items():
+            if wanted is not None and (taxonomy, tag) not in wanted:
+                continue
             for unit, points in (obj.get("units") or {}).items():
                 for p in points:
                     if p.get("end") is None or p.get("val") is None \

@@ -39,7 +39,7 @@ def _noop(_: str) -> None:  # pragma: no cover - trivial
 def known_tickers(settings: Settings | None = None) -> set[str]:
     settings = settings or get_settings()
     with connect(settings) as conn, conn.cursor() as cur:
-        cur.execute("SELECT DISTINCT ticker FROM chunks")
+        cur.execute("SELECT DISTINCT ticker FROM chunks WHERE corpus = 'live'")
         return {r[0] for r in cur.fetchall()}
 
 

@@ -75,6 +75,7 @@ class PipelineState(TypedDict, total=False):
     ticker: str
     query_id: str
     doc_id: str                    # benchmark/oracle-document mode: pin retrieval
+    numeric_scope: dict            # oracle-doc numeric: {"cik", "accn"}
     route: str                     # narrative | numeric | hybrid
     needs_onboarding: str          # ticker mentioned but not in the corpus
     numeric_queries: list[dict]
@@ -151,9 +152,19 @@ def build_graph(settings: Settings):
 
     def route_node(state: PipelineState) -> PipelineState:
         # Oracle-document mode (external benchmark): the document is given, so
-        # company detection and the XBRL layer (live corpus only) don't apply.
+        # company detection never applies. Numeric routing runs only when a
+        # numeric_scope (cik + accession) is provided — the XBRL layer then
+        # answers with figures as printed in that exact filing.
         if state.get("doc_id"):
-            return {"route": "narrative", "numeric_queries": [],
+            if not state.get("numeric_scope"):
+                return {"route": "narrative", "numeric_queries": [],
+                        "needs_onboarding": ""}
+            decision = route_question(
+                state["question"], state["ticker"],
+                settings=settings, query_id=state["query_id"],
+            )
+            return {"route": decision["route"],
+                    "numeric_queries": decision["queries"],
                     "needs_onboarding": ""}
         # Phase-2 router: numeric -> metrics layer, narrative -> RAG,
         # hybrid -> both. Fails open to narrative inside route_question.
@@ -205,7 +216,8 @@ def build_graph(settings: Settings):
 
     def numeric_node(state: PipelineState) -> PipelineState:
         results = execute_numeric(
-            state["numeric_queries"], state["ticker"], settings=settings)
+            state["numeric_queries"], state["ticker"], settings=settings,
+            scope=state.get("numeric_scope") or None)
         update: PipelineState = {"numeric_results": results}
         if state["route"] == "numeric" and not results:
             # Nothing computable (registry gap, missing data): fall back to
@@ -356,12 +368,16 @@ def answer_question(
     settings: Settings | None = None,
     query_id: str | None = None,
     doc_id: str | None = None,
+    numeric_scope: dict | None = None,
 ) -> dict:
     """Run the full RAG pipeline graph for one question; returns the report.
 
     ``doc_id`` switches on oracle-document mode (FinanceBench): retrieval is
-    pinned to that document, company detection and the numeric layer are
-    bypassed, and the ticker is display-only (no live-corpus membership check).
+    pinned to that document, company detection is bypassed, and the ticker is
+    display-only (no live-corpus membership check). ``numeric_scope``
+    ({"cik", "accn"}) additionally enables the XBRL numeric layer in this
+    mode, restricted to figures as printed in that exact filing; without it
+    everything routes narrative.
     """
 
     settings = settings or get_settings()
@@ -389,7 +405,7 @@ def answer_question(
     graph = build_graph(settings)
     final_state = graph.invoke(
         {"question": question, "ticker": ticker, "query_id": query_id,
-         "doc_id": doc_id or ""}
+         "doc_id": doc_id or "", "numeric_scope": numeric_scope or {}}
     )
     report = final_state["report"]
     report["latency_s"] = round(time.monotonic() - started, 1)

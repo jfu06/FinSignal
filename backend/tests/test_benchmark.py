@@ -120,7 +120,7 @@ class TestScoring:
         seen = {}
 
         def fake_answer(question, ticker, settings=None, query_id=None,
-                        doc_id=None):
+                        doc_id=None, numeric_scope=None):
             seen.update(ticker=ticker, doc_id=doc_id)
             return {"summary": "capex $1,577M", "claims": [],
                     "unsupported_rate": 0.0, "latency_s": 1.0}

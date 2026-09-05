@@ -180,8 +180,9 @@ def wired(monkeypatch, tmp_path):
             return {"cik": "1", "title": tk}
         raise pipeline.EdgarError("unknown")
     monkeypatch.setattr(pipeline, "resolve_ticker", fake_resolve)
-    monkeypatch.setattr(pipeline, "execute_numeric",
-                        lambda queries, t, settings: state.get("numeric", []))
+    monkeypatch.setattr(
+        pipeline, "execute_numeric",
+        lambda queries, t, settings, scope=None: state.get("numeric", []))
     monkeypatch.setattr(pipeline, "_persist_claims",
                         lambda claims, s: state["persisted"].append(list(claims)))
 
@@ -275,6 +276,20 @@ class TestOracleDocumentMode:
         assert report["claims"]
         assert state["retrieve_doc_id"] == "3M_2018_10K"
         assert state.get("route_calls", 0) == 0  # router bypassed entirely
+
+    def test_doc_id_with_numeric_scope_runs_router(self, wired):
+        state, settings = wired
+        state["route"] = {"route": "numeric", "companies": [],
+                          "queries": [{"op": "value", "metric": "revenue"}]}
+        state["numeric"] = [{"ok": True, "text": "3M revenue FY2018: $32.8B",
+                             "sources": []}]
+        report = pipeline.answer_question(
+            "FY2018 revenue?", "3M", settings=settings,
+            doc_id="3M_2018_10K",
+            numeric_scope={"cik": 66740, "accn": "acc-18"})
+        assert state["route_calls"] == 1          # router DID run
+        assert report["numeric"][0]["text"].startswith("3M revenue")
+        assert report["claims"] == []             # pure numeric, no RAG
 
     def test_without_doc_id_router_still_runs(self, wired):
         state, settings = wired
