@@ -285,6 +285,10 @@ def render_report(report: dict, key: str) -> None:
         # Product-only revenue under the same tag) won't.
         def _fact(s: dict) -> str:
             out = f"`{s['tag']}`"
+            if s.get("stmt_url"):
+                # concept links to the rendered statement (R#.htm) the
+                # figure sits on — the consolidated number, no dimensions
+                out = f"[{out}]({s['stmt_url']})"
             if s.get("raw_value") is not None:
                 v = s["raw_value"]
                 out += f" = {v:,.0f}" if v == int(v) else f" = {v:,.2f}"

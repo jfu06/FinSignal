@@ -120,3 +120,14 @@ CREATE TABLE IF NOT EXISTS filing_docs (
     primary_doc TEXT   NOT NULL,
     PRIMARY KEY (cik, accn)
 );
+
+-- Rendered statement pages (R3.htm etc.) per filing, from FilingSummary.xml:
+-- lets numeric provenance link the exact statement the figure sits on
+-- (income statement / balance sheet / cash flow). Lazily cached at query time.
+CREATE TABLE IF NOT EXISTS filing_stmt_pages (
+    cik       BIGINT NOT NULL,
+    accn      TEXT   NOT NULL,
+    stmt      TEXT   NOT NULL,   -- income | balance | cashflow
+    html_file TEXT   NOT NULL,   -- e.g. R3.htm
+    PRIMARY KEY (cik, accn, stmt)
+);

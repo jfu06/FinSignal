@@ -192,7 +192,8 @@ def _src(p) -> dict:  # noqa: ANN001
             # full-precision reported value: lets an analyst match the fact
             # digit-for-digit in the iXBRL viewer (same tag appears again on
             # dimensional slices, e.g. Product-only revenue — §5.11)
-            "raw_value": None if p.derived else p.value}
+            "raw_value": None if p.derived else p.value,
+            "stmt_url": p.stmt_url}
 
 
 def _run_one(q: dict, default_ticker: str, settings: Settings,

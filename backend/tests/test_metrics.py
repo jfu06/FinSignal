@@ -304,3 +304,35 @@ class TestFilingUrl:
         url = filing_url(320193, "0000320193-25-000079", "aapl-20250927.htm")
         assert url == ("https://www.sec.gov/ix?doc=/Archives/edgar/data/"
                        "320193/000032019325000079/aapl-20250927.htm")
+
+
+class TestClassifyStatements:
+    XML = """<FilingSummary><MyReports>
+      <Report><ShortName>Cover Page</ShortName>
+        <HtmlFileName>R1.htm</HtmlFileName></Report>
+      <Report><ShortName>CONSOLIDATED STATEMENTS OF OPERATIONS</ShortName>
+        <HtmlFileName>R3.htm</HtmlFileName></Report>
+      <Report><ShortName>CONSOLIDATED STATEMENTS OF COMPREHENSIVE INCOME</ShortName>
+        <HtmlFileName>R4.htm</HtmlFileName></Report>
+      <Report><ShortName>CONSOLIDATED BALANCE SHEETS</ShortName>
+        <HtmlFileName>R5.htm</HtmlFileName></Report>
+      <Report><ShortName>CONSOLIDATED BALANCE SHEETS (Parenthetical)</ShortName>
+        <HtmlFileName>R6.htm</HtmlFileName></Report>
+      <Report><ShortName>CONSOLIDATED STATEMENTS OF CASH FLOWS</ShortName>
+        <HtmlFileName>R8.htm</HtmlFileName></Report>
+    </MyReports></FilingSummary>"""
+
+    def test_maps_the_three_statements(self):
+        from app.metrics import classify_statements
+        out = classify_statements(self.XML)
+        assert out == {"income": "R3.htm", "balance": "R5.htm",
+                       "cashflow": "R8.htm"}
+
+    def test_comprehensive_income_and_parenthetical_are_skipped(self):
+        from app.metrics import classify_statements
+        out = classify_statements(self.XML)
+        assert out["income"] != "R4.htm" and out["balance"] != "R6.htm"
+
+    def test_malformed_xml_yields_empty(self):
+        from app.metrics import classify_statements
+        assert classify_statements("<not-xml") == {}

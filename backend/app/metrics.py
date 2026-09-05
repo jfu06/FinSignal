@@ -65,6 +65,7 @@ class MetricPoint:
     derived: bool = False          # True when computed (Q4, growth, margins)
     note: str = ""
     tag: str = ""                  # exact XBRL concept, e.g. us-gaap:GrossProfit
+    stmt_url: str = ""             # rendered statement page holding the figure
 
     def as_dict(self) -> dict:
         return {
@@ -92,6 +93,110 @@ def filing_url(cik: int, accn: str, primary_doc: str | None = None) -> str:
                 f"{accn.replace('-', '')}/{primary_doc}")
     return (f"https://www.sec.gov/Archives/edgar/data/{cik}/"
             f"{accn.replace('-', '')}/{accn}-index.htm")
+
+
+# Which rendered financial statement each metric lives on. Drives the
+# statement-page provenance link (the R#.htm income statement / balance
+# sheet / cash flow rendering EDGAR generates for every filing).
+_STMT_BY_METRIC: dict[str, str] = {
+    "revenue": "income", "cost_of_revenue": "income", "gross_profit": "income",
+    "research_and_development": "income", "sga_expense": "income",
+    "operating_income": "income", "interest_expense": "income",
+    "net_income": "income", "eps_basic": "income", "eps_diluted": "income",
+    "total_assets": "balance", "total_liabilities": "balance",
+    "stockholders_equity": "balance", "cash_and_equivalents": "balance",
+    "current_assets": "balance", "current_liabilities": "balance",
+    "inventory": "balance", "accounts_payable": "balance",
+    "accounts_receivable": "balance", "ppe_net": "balance",
+    "long_term_debt": "balance",
+    "operating_cash_flow": "cashflow", "share_buybacks": "cashflow",
+    "capex": "cashflow", "depreciation_amortization": "cashflow",
+    "dividends_paid": "cashflow",
+    # shares_outstanding lives on the cover page — no statement link
+}
+
+
+def classify_statements(xml_text: str) -> dict[str, str]:
+    """FilingSummary.xml -> {"income"|"balance"|"cashflow": "R#.htm"}.
+
+    First matching report per statement (lowest position), skipping
+    parenthetical and comprehensive-income variants.
+    """
+
+    import xml.etree.ElementTree as ET
+
+    out: dict[str, str] = {}
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return out
+    for report in root.iter("Report"):
+        name = (report.findtext("ShortName") or "").upper()
+        html = report.findtext("HtmlFileName") or ""
+        if not html or "PARENTHETICAL" in name:
+            continue
+        if ("balance" not in out
+                and ("BALANCE SHEET" in name or "FINANCIAL POSITION" in name)):
+            out["balance"] = html
+        elif "cashflow" not in out and "CASH FLOW" in name:
+            out["cashflow"] = html
+        elif ("income" not in out and "COMPREHENSIVE" not in name
+                and ("STATEMENTS OF OPERATIONS" in name
+                     or "STATEMENT OF OPERATIONS" in name
+                     or "OF INCOME" in name or "OF EARNINGS" in name
+                     or "INCOME STATEMENT" in name)):
+            out["income"] = html
+    return out
+
+
+_STMT_CACHE: dict[tuple[int, str], dict[str, str]] = {}
+
+
+def _stmt_url(cik: int, accn: str, metric: str,
+              settings: Settings) -> str:
+    """Link to the rendered statement the metric's figure sits on ("" if n/a).
+
+    DB-cached; on first sight of a filing, one FilingSummary.xml fetch.
+    Provenance must never break an answer: any failure returns "".
+    """
+
+    stmt = _STMT_BY_METRIC.get(metric)
+    if stmt is None:
+        return ""
+    key = (cik, accn)
+    pages = _STMT_CACHE.get(key)
+    try:
+        if pages is None:
+            with connect(settings) as conn, conn.cursor() as cur:
+                cur.execute(
+                    "SELECT stmt, html_file FROM filing_stmt_pages "
+                    "WHERE cik = %s AND accn = %s", (cik, accn))
+                pages = dict(cur.fetchall())
+            if not pages:
+                from .edgar import _get
+                xml_text = _get(
+                    f"https://www.sec.gov/Archives/edgar/data/{cik}/"
+                    f"{accn.replace('-', '')}/FilingSummary.xml")
+                pages = classify_statements(xml_text)
+                if pages:
+                    with connect(settings) as conn, conn.cursor() as cur:
+                        cur.executemany(
+                            """
+                            INSERT INTO filing_stmt_pages
+                                (cik, accn, stmt, html_file)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (cik, accn, stmt) DO NOTHING
+                            """,
+                            [(cik, accn, s, f) for s, f in pages.items()])
+                        conn.commit()
+            _STMT_CACHE[key] = pages
+    except Exception:  # noqa: BLE001
+        _STMT_CACHE[key] = pages = pages or {}
+    html = pages.get(stmt)
+    if not html:
+        return ""
+    return (f"https://www.sec.gov/Archives/edgar/data/{cik}/"
+            f"{accn.replace('-', '')}/{html}")
 
 
 _DOC_CACHE: dict[int, dict[str, str]] = {}
@@ -266,6 +371,7 @@ def get_metric(ticker: str, metric: str, fy: int | None = None,
                 source_url=filing_url(
                     cik, point.accn, _primary_doc(cik, point.accn, settings)),
                 tag=f"{taxonomy}:{tag}",
+                stmt_url=_stmt_url(cik, point.accn, metric, settings),
             )
     return None
 
@@ -386,6 +492,7 @@ def q4_single_quarter(ticker: str, metric: str, fy: int | None = None,
                 period_start=qs[-1].end, period_end=annual.period_end,
                 accn=annual.accn, form=annual.form,
                 source_url=annual.source_url, derived=True, tag=annual.tag,
+                stmt_url=annual.stmt_url,
                 note="Q4 = FY − Q1 − Q2 − Q3 (computed; Q4 is not reported)",
             )
     return None
