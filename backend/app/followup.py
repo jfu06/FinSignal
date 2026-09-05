@@ -15,6 +15,7 @@ import anthropic
 from pydantic import BaseModel
 
 from .config import Settings, get_settings
+from .llm import anthropic_client
 from .logging_utils import log_event
 
 MAX_HISTORY_TURNS = 3
@@ -80,9 +81,7 @@ def condense_followup(
     )
 
     try:
-        client = anthropic.Anthropic(
-            api_key=settings.anthropic_api_key, max_retries=2
-        )
+        client = anthropic_client(settings, max_retries=2)
         response = client.messages.create(
             model=settings.assess_model,  # small decision — fast model
             max_tokens=300,

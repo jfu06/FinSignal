@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 import anthropic
 
 from .config import Settings, get_settings
+from .llm import anthropic_client
 from .logging_utils import log_event
 from .models import Chunk
 from .retrieval import retrieve
@@ -109,8 +110,7 @@ def _assess(
     ) or "(no chunks retrieved)"
     prompt = f"Question: {question}\n\nRetrieved chunks:\n{previews}"
 
-    # max_retries: ride out transient 5xx/429 from the API instead of failing the query
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key, max_retries=4)
+    client = anthropic_client(settings)
     response = client.messages.create(
         model=settings.assess_model,  # small+fast: decision fails safe to ENOUGH
         max_tokens=400,

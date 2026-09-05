@@ -13,6 +13,7 @@ from __future__ import annotations
 import anthropic
 
 from .config import Settings, get_settings
+from .llm import anthropic_client
 from .logging_utils import log_event
 from .models import Chunk, Claim, Verdict
 from .schemas import VerdictsPayload
@@ -130,8 +131,7 @@ def verify_claims_batch(
         return claims
 
     settings = settings or get_settings()
-    # max_retries: ride out transient 5xx/429 from the API instead of failing the query
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key, max_retries=4)
+    client = anthropic_client(settings)
 
     judge_prompt = (
         "Fact-check every claim below against its cited evidence. "

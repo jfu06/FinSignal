@@ -31,6 +31,7 @@ import anthropic
 
 from .config import Settings, get_settings
 from .db import connect
+from .llm import anthropic_client
 from .logging_utils import log_event
 from .models import Chunk
 from .pipeline import answer_question, is_numeric_question
@@ -112,7 +113,7 @@ def generate_questions(chunks: list[Chunk], settings: Settings) -> list[dict]:
     payload = "\n\n".join(
         f'<chunk id="{c.chunk_id}">\n{c.text[:2000]}\n</chunk>' for c in chunks
     )
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key, max_retries=4)
+    client = anthropic_client(settings)
     response = client.messages.create(
         model=settings.assess_model,  # drafting test questions: fast model is fine
         max_tokens=1500,
