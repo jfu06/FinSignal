@@ -549,7 +549,7 @@ else:
     # away after the conversation starts (switch ticker, re-ask, compare).
     with st.expander(
             f"📋 Question checklist — asks about {ticker}; switch company "
-            f"in the sidebar to compare"):
+            f"in the sidebar to compare", expanded=True):
         _render_checklist("lib")
 
 # --- one-click digest (cold-start entry point) ---
