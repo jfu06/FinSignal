@@ -31,6 +31,7 @@ from app.config import get_settings  # noqa: E402
 from app.edgar import EdgarError  # noqa: E402
 from app.onboarding import OnboardingError, ensure_ticker, known_tickers  # noqa: E402
 from app.pipeline import PipelineError, answer_question  # noqa: E402
+from app.digest import DIGEST_QUERY_COST, digest_summary, generate_digest  # noqa: E402
 from app.followup import condense_followup  # noqa: E402
 from app.smoke_eval import load_smoke_result, run_smoke_eval  # noqa: E402
 from app.usage import daily_budget_left  # noqa: E402
@@ -264,6 +265,27 @@ def render_claim(c: dict) -> None:
             st.text(cite["preview"])
 
 
+def render_digest(digest: dict, key: str) -> None:
+    st.markdown(f"### 📊 {digest['ticker']} — Annual report digest")
+    st.caption(
+        f"Generated in {digest.get('latency_s', 0):.0f}s. Figures are "
+        f"official filing data (deterministic); every narrative claim below "
+        f"is independently verified."
+    )
+    for r in digest.get("figures", []):
+        st.info(f"🔢 {r['text']}")
+        links = " · ".join(
+            f"[{s['form']} {s['accn']}]({s['url']})" for s in r["sources"][:2])
+        if links:
+            st.caption(links)
+    for sec in digest.get("sections", []):
+        st.markdown(f"#### {sec['title']}")
+        if "error" in sec:
+            st.error(f"This section failed to generate: {sec['error'][:120]}")
+            continue
+        render_report(sec["report"], key=sec["report"]["query_id"])
+
+
 # --- replay the conversation ---
 for i, turn in enumerate(history):
     with st.chat_message("user"):
@@ -273,6 +295,8 @@ for i, turn in enumerate(history):
     with st.chat_message("assistant"):
         if turn.get("error"):
             st.error(turn["error"])
+        elif turn.get("digest"):
+            render_digest(turn["digest"], key=f"digest_{i}")
         else:
             render_report(turn["report"], key=turn["report"]["query_id"])
 
@@ -283,6 +307,34 @@ if not history:
         "Follow-up questions are welcome; each answer is claim-checked "
         "against the filing."
     )
+
+# --- one-click digest (cold-start entry point) ---
+if st.button(f"📊 Generate {ticker} annual report digest (~2 min)",
+             use_container_width=True):
+    if len(history) >= settings().session_query_limit:
+        st.warning("Session limit reached — refresh the page to start over.")
+    elif daily_budget_left(settings().log_path,
+                           settings().daily_query_budget) < DIGEST_QUERY_COST:
+        st.warning("Not enough daily budget left for a digest — try tomorrow.")
+    else:
+        with st.chat_message("user"):
+            st.markdown(f"**[{ticker}]** 📊 Annual report digest")
+        with st.chat_message("assistant"):
+            with st.status("Building digest…", expanded=True) as s:
+                try:
+                    d = generate_digest(ticker, settings=settings(),
+                                        progress=st.write)
+                    s.update(label=f"Digest ready ({d['latency_s']:.0f}s)",
+                             state="complete")
+                    history.append({
+                        "question": "📊 Annual report digest",
+                        "ticker": ticker, "digest": d,
+                        "summary_for_context": digest_summary(d),
+                    })
+                    st.rerun()
+                except Exception as exc:  # noqa: BLE001
+                    s.update(label="Digest failed", state="error")
+                    st.error(f"Digest failed, please retry. ({exc})")
 
 prompt = st.chat_input(f"Ask about {ticker}… (any language, follow-ups OK)")
 if prompt and prompt.strip():
@@ -305,12 +357,16 @@ if prompt and prompt.strip():
             with st.spinner("Retrieve → generate → batch-verify… (typically < 60 s)"):
                 turn: dict = {"question": prompt, "ticker": ticker}
                 try:
-                    qa_history = [
-                        {"question": t["question"],
-                         "summary": t["report"]["summary"]}
-                        for t in history
-                        if t.get("report") and t["report"].get("supported", True)
-                    ]
+                    qa_history = []
+                    for t in history:
+                        if t.get("digest"):
+                            qa_history.append(
+                                {"question": t["question"],
+                                 "summary": t.get("summary_for_context", "")})
+                        elif t.get("report") and t["report"].get("supported", True):
+                            qa_history.append(
+                                {"question": t["question"],
+                                 "summary": t["report"]["summary"]})
                     standalone = condense_followup(
                         prompt, qa_history, settings=settings()
                     )

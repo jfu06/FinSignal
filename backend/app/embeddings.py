@@ -25,9 +25,17 @@ come from the same model.
 
 from __future__ import annotations
 
+import threading
 from functools import lru_cache
 
 from .config import Settings, get_settings
+
+# Model loading and encoding are guarded by a lock: lru_cache does NOT
+# deduplicate concurrent first calls, so parallel pipeline runs (the digest's
+# four sections) would race four simultaneous torch model initializations —
+# observed to crash the process. Encoding itself is ~ms, so serializing it
+# costs nothing while keeping torch usage single-threaded and safe.
+_LOCK = threading.Lock()
 
 # Query-side instruction for BGE v1.5 English retrieval models.
 BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
@@ -63,13 +71,14 @@ def embed_passages(
 
     settings = settings or get_settings()
     _, passage_prefix = _prefixes(settings.embedding_model)
-    model = _load_model(settings.embedding_model)
-    vectors = model.encode(
-        [passage_prefix + t for t in texts],
-        normalize_embeddings=True,
-        batch_size=128,
-        show_progress_bar=len(texts) > 200,
-    )
+    with _LOCK:
+        model = _load_model(settings.embedding_model)
+        vectors = model.encode(
+            [passage_prefix + t for t in texts],
+            normalize_embeddings=True,
+            batch_size=128,
+            show_progress_bar=len(texts) > 200,
+        )
     return [v.tolist() for v in vectors]
 
 
@@ -78,6 +87,8 @@ def embed_query(text: str, settings: Settings | None = None) -> list[float]:
 
     settings = settings or get_settings()
     query_prefix, _ = _prefixes(settings.embedding_model)
-    model = _load_model(settings.embedding_model)
-    vector = model.encode([query_prefix + text], normalize_embeddings=True)[0]
+    with _LOCK:
+        model = _load_model(settings.embedding_model)
+        vector = model.encode([query_prefix + text],
+                              normalize_embeddings=True)[0]
     return vector.tolist()
