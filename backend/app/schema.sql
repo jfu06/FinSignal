@@ -52,3 +52,53 @@ CREATE TABLE IF NOT EXISTS test_cases (
     expected_answer_snippet TEXT,
     expected_chunk_id       TEXT
 );
+
+-- ============================================================
+-- Phase 2: numeric line (SEC XBRL companyfacts).
+-- Schema follows docs/data-dictionary.md §6.
+-- ============================================================
+
+-- Raw facts, one row per reported data point. Re-ingest replaces a company
+-- wholesale (DELETE by cik + INSERT), so no upsert key gymnastics with the
+-- nullable start_date (instant concepts have no period start, §5.5).
+CREATE TABLE IF NOT EXISTS xbrl_facts (
+    cik        BIGINT  NOT NULL,
+    taxonomy   TEXT    NOT NULL,   -- us-gaap | dei | ifrs-full | srt
+    tag        TEXT    NOT NULL,
+    unit       TEXT    NOT NULL,   -- USD | shares | USD/shares | pure | ...
+    start_date DATE,               -- NULL for instant (balance-sheet) concepts
+    end_date   DATE    NOT NULL,
+    val        NUMERIC NOT NULL,   -- raw units: dollars are dollars (§0)
+    accn       TEXT    NOT NULL,   -- accession number -> provenance link
+    fy         INT,                -- filing's fiscal year, NOT the data's (§5.2)
+    fp         TEXT,
+    form       TEXT,               -- 10-K | 10-Q | 10-K/A | 8-K ...
+    filed      DATE    NOT NULL,
+    frame      TEXT               -- set only on SEC's canonical point (§5.4)
+);
+
+CREATE INDEX IF NOT EXISTS xbrl_facts_lookup_idx
+    ON xbrl_facts (cik, taxonomy, tag, unit, end_date);
+
+-- Dedup view: the same (period, concept) is re-reported by amendments and
+-- later filings' comparative periods, values can differ (§5.3) and splits are
+-- not restated (§5.9) — always take the LATEST-filed record per period.
+CREATE OR REPLACE VIEW facts_dedup AS
+SELECT DISTINCT ON (cik, taxonomy, tag, unit, start_date, end_date)
+    *
+FROM xbrl_facts
+ORDER BY cik, taxonomy, tag, unit, start_date, end_date, filed DESC, accn DESC;
+
+-- Canonical view: only SEC's official representative points (frames, §5.4).
+CREATE OR REPLACE VIEW facts_canonical AS
+SELECT * FROM xbrl_facts WHERE frame IS NOT NULL;
+
+-- Metric -> tag priority list: one metric maps to several tags over time
+-- (AAPL revenue used 3 different tags, §5.1). Seeded from app/xbrl.py.
+CREATE TABLE IF NOT EXISTS metric_map (
+    metric   TEXT NOT NULL,
+    taxonomy TEXT NOT NULL,
+    tag      TEXT NOT NULL,
+    priority INT  NOT NULL,        -- 1 = preferred
+    PRIMARY KEY (metric, taxonomy, tag)
+);
