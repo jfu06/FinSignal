@@ -67,10 +67,14 @@ def evaluate_case(case: dict, settings) -> dict:  # noqa: ANN001
     )
 
     if case["kind"] == "numeric_boundary":
-        # Must get the explicit "not yet supported" data-boundary reply.
-        ok = report.get("supported", True) is False
+        # Phase 2: numeric questions must be HANDLED, not rejected — either a
+        # deterministic numeric answer, or a graceful fallback to a judged
+        # narrative answer. A crash or an unhandled shape fails.
+        ok = bool(report.get("numeric")) or bool(report.get("claims"))
         return {"case_id": case["case_id"], "kind": case["kind"],
-                "boundary_ok": ok, "verdicts": Counter(), "n_claims": 0}
+                "boundary_ok": ok,
+                "numeric_answered": bool(report.get("numeric")),
+                "verdicts": Counter(), "n_claims": 0}
 
     # Narrative: gather final verdicts (displayed + blocked = all judged claims).
     verdicts: Counter = Counter()
@@ -164,7 +168,8 @@ def main() -> int:
               f"snippet_hit={'Y' if r['snippet_hit'] else 'n'}")
     for r in boundary:
         status = "OK" if r.get("boundary_ok") else "FAILED"
-        print(f"  {r['case_id']}: numeric-boundary reply {status}")
+        how = "numeric" if r.get("numeric_answered") else "narrative-fallback"
+        print(f"  {r['case_id']}: numeric question handled ({how}) {status}")
 
     print("\nVerdict distribution:", dict(total_verdicts))
     hits = sum(1 for r in narrative if r.get("retrieval_hit"))

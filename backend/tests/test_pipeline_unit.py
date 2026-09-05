@@ -166,6 +166,12 @@ class TestAnswerQuestionOrchestration:
             lambda q, t, settings, query_id: (
                 [chunk], RefinementTrace(rounds=1, final_query=q, final_k=6)),
         )
+        # default routing: narrative, no numeric queries; tests override state
+        state["route"] = {"route": "narrative", "queries": []}
+        monkeypatch.setattr(pipeline, "route_question",
+                            lambda q, t, settings, query_id: state["route"])
+        monkeypatch.setattr(pipeline, "execute_numeric",
+                            lambda queries, t, settings: state.get("numeric", []))
         monkeypatch.setattr(pipeline, "_persist_claims",
                             lambda claims, s: state["persisted"].append(list(claims)))
 
@@ -210,13 +216,40 @@ class TestAnswerQuestionOrchestration:
         with pytest.raises(pipeline.PipelineError, match="non-empty"):
             pipeline.answer_question("   ", "AAPL", settings=settings)
 
-    def test_numeric_question_gets_boundary_reply_without_llm(self, wired):
+    def test_numeric_route_answers_without_rag(self, wired):
         state, settings = wired
+        state["route"] = {"route": "numeric",
+                          "queries": [{"op": "cagr", "metric": "revenue"}]}
+        state["numeric"] = [{"ok": True, "text": "AAPL revenue 3Y CAGR: +1.81%",
+                             "sources": [], "query": {}}]
         report = pipeline.answer_question("苹果的营收 CAGR 是多少？", "AAPL",
                                           settings=settings)
-        assert report["supported"] is False
-        assert "暂不支持" in report["message"]
-        assert state["generate_calls"] == 0
+        assert report["numeric"][0]["text"].startswith("AAPL revenue")
+        assert "CAGR" in report["summary"]
+        assert state["generate_calls"] == 0          # RAG never touched
+        assert report["unsupported_rate"] == 0.0
+
+    def test_numeric_route_with_no_results_falls_back_to_rag(self, wired):
+        state, settings = wired
+        state["route"] = {"route": "numeric",
+                          "queries": [{"op": "value", "metric": "revenue"}]}
+        state["numeric"] = []                        # execution came up empty
+        report = pipeline.answer_question("some numeric question", "AAPL",
+                                          settings=settings)
+        assert state["generate_calls"] >= 1          # fell back to RAG
+        assert report["claims"]
+
+    def test_hybrid_route_merges_numeric_into_rag_report(self, wired):
+        state, settings = wired
+        state["route"] = {"route": "hybrid",
+                          "queries": [{"op": "yoy", "metric": "revenue"}]}
+        state["numeric"] = [{"ok": True, "text": "AAPL revenue +6.4% YoY",
+                             "sources": [], "query": {}}]
+        report = pipeline.answer_question("营收增长多少?靠什么驱动?", "AAPL",
+                                          settings=settings)
+        assert state["generate_calls"] >= 1          # RAG ran
+        assert report["numeric"][0]["text"] == "AAPL revenue +6.4% YoY"
+        assert report["claims"]                      # narrative too
 
 
 class TestGraphStructure:
@@ -224,11 +257,14 @@ class TestGraphStructure:
         compiled = pipeline.build_graph(make_settings(tmp_path))
         g = compiled.get_graph()
         nodes = set(g.nodes)
-        assert {"boundary_check", "retrieve", "generate", "verify",
+        assert {"route_question", "run_numeric", "assemble_numeric",
+                "retrieve", "generate", "verify",
                 "flag_regeneration", "assemble"} <= nodes
         edges = {(e.source, e.target) for e in g.edges}
         # the one-shot regeneration loop is an explicit edge back to generate
         assert ("flag_regeneration", "generate") in edges
+        # the numeric fallback path re-enters the RAG line
+        assert ("run_numeric", "retrieve") in edges
 
 
 class TestSmallHelpers:

@@ -34,13 +34,14 @@ from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from .assembler import assemble_report
+from .assembler import DISCLAIMER, assemble_report
 from .config import Settings, get_settings
 from .db import connect
 from .generation import generate_answer
 from .logging_utils import log_event
 from .models import Chunk, Claim, Verdict
 from .refinement import RefinementTrace, retrieve_refined
+from .router import execute_numeric, route_question
 from .verification import verify_claims_batch
 
 # Conservative guard for explicitly computational/aggregation asks.
@@ -72,7 +73,9 @@ class PipelineState(TypedDict, total=False):
     question: str
     ticker: str
     query_id: str
-    numeric_rejected: bool
+    route: str                     # narrative | numeric | hybrid
+    numeric_queries: list[dict]
+    numeric_results: list[dict]
     chunks: list[Chunk]
     refinement: RefinementTrace
     summary: str
@@ -143,24 +146,52 @@ def _contradiction_feedback(claims: list[Claim]) -> str:
 def build_graph(settings: Settings):
     """Compile the QA pipeline as a LangGraph StateGraph."""
 
-    def boundary_check(state: PipelineState) -> PipelineState:
-        # Phase-1 data boundary: numeric/aggregation questions not supported.
-        if is_numeric_question(state["question"]):
-            log_event(
-                "numeric_question_rejected", settings.log_path,
-                query_id=state["query_id"], ticker=state["ticker"],
-            )
-            return {
-                "numeric_rejected": True,
-                "report": {
-                    "query_id": state["query_id"],
-                    "ticker": state["ticker"],
-                    "question": state["question"],
-                    "supported": False,
-                    "message": NUMERIC_NOT_SUPPORTED_MSG,
-                },
-            }
-        return {"numeric_rejected": False}
+    def route_node(state: PipelineState) -> PipelineState:
+        # Phase-2 router: numeric -> metrics layer, narrative -> RAG,
+        # hybrid -> both. Fails open to narrative inside route_question.
+        decision = route_question(
+            state["question"], state["ticker"],
+            settings=settings, query_id=state["query_id"],
+        )
+        log_event(
+            "routed", settings.log_path,
+            query_id=state["query_id"], route=decision["route"],
+            queries=decision["queries"],
+        )
+        return {"route": decision["route"],
+                "numeric_queries": decision["queries"]}
+
+    def numeric_node(state: PipelineState) -> PipelineState:
+        results = execute_numeric(
+            state["numeric_queries"], state["ticker"], settings=settings)
+        update: PipelineState = {"numeric_results": results}
+        if state["route"] == "numeric" and not results:
+            # Nothing computable (registry gap, missing data): fall back to
+            # the RAG line rather than refusing.
+            log_event("numeric_fallback", settings.log_path,
+                      query_id=state["query_id"])
+            update["route"] = "narrative"
+        return update
+
+    def assemble_numeric(state: PipelineState) -> PipelineState:
+        # Pure-numeric answer: deterministic renderings, no LLM, no claims.
+        results = state["numeric_results"]
+        report: dict[str, Any] = {
+            "query_id": state["query_id"],
+            "ticker": state["ticker"],
+            "question": state["question"],
+            "summary": "\n".join(r["text"] for r in results),
+            "claims": [], "risk_flags": [], "unsupported_claims": [],
+            "blocked_claims": [], "unsupported_rate": 0.0,
+            "numeric": results,
+            "disclaimer": DISCLAIMER,
+        }
+        log_event(
+            "report_summary", settings.log_path,
+            query_id=state["query_id"], unsupported_rate=0.0,
+            num_claims=0, num_blocked=0, numeric_results=len(results),
+        )
+        return {"report": report}
 
     def retrieve(state: PipelineState) -> PipelineState:
         # Bounded agentic refinement loop (see app.refinement).
@@ -207,6 +238,8 @@ def build_graph(settings: Settings):
             state["summary"], state["claims"], state["chunks"],
         )
         report["retrieved_chunk_ids"] = [c.chunk_id for c in state["chunks"]]
+        if state.get("numeric_results"):  # hybrid: verified figures alongside
+            report["numeric"] = state["numeric_results"]
         trace = state["refinement"]
         report["retrieval"] = {
             "rounds": trace.rounds,
@@ -223,8 +256,12 @@ def build_graph(settings: Settings):
         )
         return {"report": report}
 
-    def route_after_boundary(state: PipelineState) -> str:
-        return "rejected" if state["numeric_rejected"] else "narrative"
+    def route_after_router(state: PipelineState) -> str:
+        return "narrative" if state["route"] == "narrative" else "numeric"
+
+    def route_after_numeric(state: PipelineState) -> str:
+        # hybrid (or numeric-with-no-results fallback) continues into RAG
+        return "assemble_numeric" if state["route"] == "numeric" else "narrative"
 
     def route_after_verify(state: PipelineState) -> str:
         contradicted = any(
@@ -235,18 +272,25 @@ def build_graph(settings: Settings):
         return "assemble"
 
     graph = StateGraph(PipelineState)
-    graph.add_node("boundary_check", boundary_check)
+    graph.add_node("route_question", route_node)
+    graph.add_node("run_numeric", numeric_node)
+    graph.add_node("assemble_numeric", assemble_numeric)
     graph.add_node("retrieve", retrieve)
     graph.add_node("generate", generate)
     graph.add_node("verify", verify)
     graph.add_node("flag_regeneration", flag_regeneration)
     graph.add_node("assemble", assemble)
 
-    graph.add_edge(START, "boundary_check")
+    graph.add_edge(START, "route_question")
     graph.add_conditional_edges(
-        "boundary_check", route_after_boundary,
-        {"rejected": END, "narrative": "retrieve"},
+        "route_question", route_after_router,
+        {"narrative": "retrieve", "numeric": "run_numeric"},
     )
+    graph.add_conditional_edges(
+        "run_numeric", route_after_numeric,
+        {"assemble_numeric": "assemble_numeric", "narrative": "retrieve"},
+    )
+    graph.add_edge("assemble_numeric", END)
     graph.add_edge("retrieve", "generate")
     graph.add_edge("generate", "verify")
     graph.add_conditional_edges(
@@ -299,6 +343,12 @@ def _print_report(report: dict) -> None:  # pragma: no cover - CLI rendering
     if not report.get("supported", True):
         print(f"\n⛔ {report['message']}")
         return
+    if report.get("numeric"):
+        print("\n### 数值(官方申报数据,确定性计算)")
+        for r in report["numeric"]:
+            print(f"🔢 {r['text']}")
+            for s in r["sources"][:2]:
+                print(f"    ↳ {s['form']} {s['accn']}  {s['url']}")
     print(f"\n### 摘要\n{report['summary']}\n")
     print("### 结论")
     for c in report["claims"]:

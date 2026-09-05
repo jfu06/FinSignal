@@ -182,7 +182,19 @@ def render_report(report: dict, key: str) -> None:
         )
         return
 
-    st.markdown(report["summary"])
+    # Verified figures (Phase-2 numeric line): deterministic math over
+    # official XBRL filings — every number links to its SEC filing.
+    for r in report.get("numeric", []):
+        st.info(f"🔢 {r['text']}")
+        links = " · ".join(
+            f"[{s['form']} {s['accn']}]({s['url']})" for s in r["sources"][:3]
+        )
+        if links:
+            st.caption(f"Official filing data (deterministic, no LLM): {links}")
+
+    if report["summary"] and not (report.get("numeric")
+                                  and not report["claims"]):
+        st.markdown(report["summary"])
     ok_claims = [c for c in report["claims"] if not c["unverified"]]
     warn_claims = [c for c in report["claims"] if c["unverified"]]
     st.caption(

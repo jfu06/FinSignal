@@ -173,6 +173,48 @@ class AssessmentPayload(BaseModel):
             return cls()
 
 
+# ----------------------------- routing -----------------------------------
+
+
+class RouteQuery(BaseModel):
+    """One structured numeric query emitted by the router."""
+
+    op: str = "value"
+    metric: str = ""
+    fy: int | None = None
+    years: int | None = None
+    tickers: list[str] = Field(default_factory=list)
+
+
+class RoutePayload(BaseModel):
+    """record_route output; invalid shapes collapse to narrative (fail-open)."""
+
+    route: Literal["narrative", "numeric", "hybrid"] = "narrative"
+    queries: list[RouteQuery] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce(cls, data: object) -> dict:
+        if not isinstance(data, dict):
+            return {"route": "narrative", "queries": []}
+        route = data.get("route")
+        if route not in ("narrative", "numeric", "hybrid"):
+            route = "narrative"
+        queries = data.get("queries")
+        if not isinstance(queries, list):
+            queries = []
+        return {"route": route, "queries": [
+            q for q in queries if isinstance(q, dict) and q.get("metric")
+        ]}
+
+    @classmethod
+    def from_tool_input(cls, raw: object) -> "RoutePayload":
+        try:
+            return cls.model_validate(raw)
+        except ValidationError:  # pragma: no cover - _coerce guards
+            return cls()
+
+
 # ----------------------------- smoke eval --------------------------------
 
 

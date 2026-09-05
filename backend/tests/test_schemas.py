@@ -108,6 +108,26 @@ class TestAssessmentPayload:
         assert p.new_query == ""
 
 
+class TestRoutePayload:
+    def test_valid_route_with_queries(self):
+        from app.schemas import RoutePayload
+        p = RoutePayload.from_tool_input({"route": "numeric", "queries": [
+            {"op": "cagr", "metric": "revenue", "years": 3}]})
+        assert p.route == "numeric"
+        assert p.queries[0].years == 3
+
+    def test_invalid_route_collapses_to_narrative(self):
+        from app.schemas import RoutePayload
+        assert RoutePayload.from_tool_input({"route": "sql"}).route == "narrative"
+        assert RoutePayload.from_tool_input(None).route == "narrative"
+
+    def test_queries_without_metric_dropped(self):
+        from app.schemas import RoutePayload
+        p = RoutePayload.from_tool_input({"route": "numeric", "queries": [
+            {"op": "value"}, {"op": "value", "metric": "revenue"}]})
+        assert len(p.queries) == 1
+
+
 class TestQuestionsPayload:
     def test_junk_items_dropped(self):
         p = QuestionsPayload.from_tool_input({"items": [
