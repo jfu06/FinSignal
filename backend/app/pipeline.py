@@ -57,13 +57,6 @@ _NUMERIC_PATTERNS = [
 ]
 _NUMERIC_RE = re.compile("|".join(_NUMERIC_PATTERNS), re.IGNORECASE)
 
-NUMERIC_NOT_SUPPORTED_MSG = (
-    "数值计算/聚合类问题（如平均值、增长率、CAGR、比率计算）暂不支持——"
-    "该能力属于二期的结构化指标层（SEC XBRL），本期仅支持基于 10-K 原文的"
-    "叙述类问答。请改用描述性问题，例如“营收增长的主要驱动因素是什么？”"
-)
-
-
 class PipelineError(ValueError):
     """Invalid user input (unknown ticker, empty question, …)."""
 

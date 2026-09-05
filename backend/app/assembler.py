@@ -20,8 +20,8 @@ from .models import Chunk, Claim, ClaimStatus, VERDICT_TO_STATUS, Verdict
 from .span_overlap import check_claim
 
 DISCLAIMER = (
-    "本分析仅供参考，基于所引用的公开文件片段自动生成，不构成投资建议。"
-    "This analysis is for reference only and is not investment advice."
+    "This analysis is generated automatically from cited public-filing "
+    "excerpts, for reference only, and is not investment advice."
 )
 
 # Per-claim credibility score derived from the judge verdict. A simple,

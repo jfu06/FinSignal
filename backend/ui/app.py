@@ -497,33 +497,29 @@ for i, turn in enumerate(history):
         else:
             render_report(turn["report"], key=turn["report"]["query_id"])
 
-if not history:
-    st.markdown(
-        f'<div class="fs-step"><b>1️⃣ Pick a company</b> in the sidebar '
-        f'(currently <b>{ticker}</b>) &nbsp;→&nbsp; '
-        f'<b>2️⃣ Start from a common question</b> below, or type your own '
-        f'in any language.</div>',
-        unsafe_allow_html=True,
-    )
-    # Generic templates — no company names: the selected ticker is filled
-    # in automatically, so switching companies never leaves a stale example.
-    _CATEGORIES = [
-        ("num", "🔢 Figures — computed",
-         "official XBRL data, ~3 s",
-         ["What was last fiscal year's revenue, and how fast did it grow?",
-          "What is the 3-year trend in gross margin?",
-          "How much cash was spent on share buybacks?"]),
-        ("doc", "📄 From the filing — verified",
-         "every claim cited & checked, ~40 s",
-         ["What are the biggest risk factors?",
-          "What drove revenue growth last year?",
-          "How does management describe the competitive landscape?"]),
-        ("hyb", "🔢+📄 Both",
-         "figures + verified explanation",
-         ["How much was spent on R&D, and what is it going toward?",
-          "Did profitability improve, and what explains the change?",
-          "How large is the debt load, and how is it managed?"]),
-    ]
+# Analyst checklist: generic templates with NO company names — the selected
+# ticker fills in automatically, so the same checklist runs on any company
+# (the standard diligence workflow: fixed questions, rotating tickers).
+_CATEGORIES = [
+    ("num", "🔢 Figures — computed",
+     "official XBRL data, ~3 s",
+     ["What was last fiscal year's revenue, and how fast did it grow?",
+      "What is the 3-year trend in gross margin?",
+      "How much cash was spent on share buybacks?"]),
+    ("doc", "📄 From the filing — verified",
+     "every claim cited & checked, ~40 s",
+     ["What are the biggest risk factors?",
+      "What drove revenue growth last year?",
+      "How does management describe the competitive landscape?"]),
+    ("hyb", "🔢+📄 Both",
+     "figures + verified explanation",
+     ["How much was spent on R&D, and what is it going toward?",
+      "Did profitability improve, and what explains the change?",
+      "How large is the debt load, and how is it managed?"]),
+]
+
+
+def _render_checklist(key_prefix: str) -> None:
     cols = st.columns(3)
     for col, (css, title, hint, questions) in zip(cols, _CATEGORIES):
         with col:
@@ -533,9 +529,28 @@ if not history:
                 unsafe_allow_html=True,
             )
             for i, q in enumerate(questions):
-                if st.button(q, key=f"ex_{css}_{i}", use_container_width=True):
+                if st.button(q, key=f"{key_prefix}_{css}_{i}",
+                             use_container_width=True):
                     st.session_state["queued_q"] = q
                     st.rerun()
+
+
+if not history:
+    st.markdown(
+        f'<div class="fs-step"><b>1️⃣ Pick a company</b> in the sidebar '
+        f'(currently <b>{ticker}</b>) &nbsp;→&nbsp; '
+        f'<b>2️⃣ Start from a common question</b> below, or type your own '
+        f'in any language.</div>',
+        unsafe_allow_html=True,
+    )
+    _render_checklist("ex")
+else:
+    # Analysts run the same checklist across companies — keep it one click
+    # away after the conversation starts (switch ticker, re-ask, compare).
+    with st.expander(
+            f"📋 Question checklist — asks about {ticker}; switch company "
+            f"in the sidebar to compare"):
+        _render_checklist("lib")
 
 # --- one-click digest (cold-start entry point) ---
 if st.button(f"📊 Generate {ticker} annual report digest (~2 min)",
