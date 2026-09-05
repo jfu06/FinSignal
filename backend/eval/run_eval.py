@@ -58,6 +58,29 @@ def sync_test_cases(cases: list[dict], settings) -> None:  # noqa: ANN001
         conn.commit()
 
 
+def check_numeric_case(case: dict, report: dict) -> dict:
+    """Pure check: was the numeric answer COMPUTED CORRECTLY?
+
+    Correct = numeric results present, every expected substring appears in
+    the rendered texts, and (when pinned) the expected accession number is
+    among the sources. This is what catches a broken formula, a broken dedup
+    rule, or a broken metric mapping.
+    """
+
+    results = report.get("numeric") or []
+    joined = " ".join(r.get("text", "") for r in results)
+    accns = {s.get("accn") for r in results for s in r.get("sources", [])}
+    subs_ok = all(s in joined for s in case.get("expected_substrings", []))
+    accn = case.get("expected_accn")
+    accn_ok = (accn is None) or (accn in accns)
+    return {
+        "numeric_answered": bool(results),
+        "values_ok": bool(results) and subs_ok,
+        "accn_ok": accn_ok,
+        "ok": bool(results) and subs_ok and accn_ok,
+    }
+
+
 def evaluate_case(case: dict, settings) -> dict:  # noqa: ANN001
     """Run one case through the pipeline; return per-case metrics."""
 
@@ -65,6 +88,11 @@ def evaluate_case(case: dict, settings) -> dict:  # noqa: ANN001
         case["question"], case["ticker"],
         settings=settings, query_id=f"eval_{case['case_id']}",
     )
+
+    if case["kind"] == "numeric":
+        check = check_numeric_case(case, report)
+        return {"case_id": case["case_id"], "kind": case["kind"],
+                **check, "verdicts": Counter(), "n_claims": 0}
 
     if case["kind"] == "numeric_boundary":
         # Phase 2: numeric questions must be HANDLED, not rejected — either a
@@ -151,6 +179,7 @@ def main() -> int:
 
     narrative = [r for r in results if r["kind"] == "narrative"]
     boundary = [r for r in results if r["kind"] == "numeric_boundary"]
+    numeric = [r for r in results if r["kind"] == "numeric"]
     crashed = [r for r in results if "error" in r]
 
     print("\n" + "=" * 62)
@@ -170,6 +199,12 @@ def main() -> int:
         status = "OK" if r.get("boundary_ok") else "FAILED"
         how = "numeric" if r.get("numeric_answered") else "narrative-fallback"
         print(f"  {r['case_id']}: numeric question handled ({how}) {status}")
+    for r in numeric:
+        status = "OK" if r.get("ok") else "WRONG"
+        detail = ("" if r.get("ok") else
+                  f" (answered={r.get('numeric_answered')}, "
+                  f"values_ok={r.get('values_ok')}, accn_ok={r.get('accn_ok')})")
+        print(f"  {r['case_id']}: numeric value check {status}{detail}")
 
     print("\nVerdict distribution:", dict(total_verdicts))
     hits = sum(1 for r in narrative if r.get("retrieval_hit"))
@@ -196,9 +231,12 @@ def main() -> int:
             print(f"      reason: {f['reason']}")
 
     boundary_failed = [r for r in boundary if not r.get("boundary_ok")]
+    numeric_wrong = [r for r in numeric if not r.get("ok")]
     if boundary_failed:
         print(f"\n⚠️  {len(boundary_failed)} numeric-boundary case(s) FAILED "
-              f"(pipeline answered instead of declining).")
+              f"(question not handled).")
+    if numeric_wrong:
+        print(f"⚠️  {len(numeric_wrong)} numeric case(s) computed WRONG values.")
     if crashed:
         print(f"⚠️  {len(crashed)} case(s) crashed.")
 
@@ -216,6 +254,10 @@ def main() -> int:
     if rate > settings.unsupported_rate_threshold:
         print(f"\n❌ GATE FAILED: unsupported rate {rate:.2%} > "
               f"{settings.unsupported_rate_threshold:.0%} — do not ship.")
+        return 1
+    if numeric_wrong:
+        print("\n❌ GATE FAILED: numeric answers computed wrong values — "
+              "do not ship.")
         return 1
     if crashed:
         print("\n❌ GATE FAILED: eval could not run end-to-end.")

@@ -81,10 +81,25 @@ def ensure_ticker(
     progress("Chunking + embedding locally + writing to Neon…")
     num_chunks = ingest_file(path, settings)
 
+    # Numeric line: pull the company's official XBRL figures too, so the
+    # metrics router can answer "how much" questions immediately. Fail-soft:
+    # the document line is the core product; a facts hiccup must not block
+    # onboarding (numeric questions then fall back to RAG by design).
+    progress("Fetching official XBRL figures (companyfacts)…")
+    num_facts = 0
+    try:
+        from .xbrl import ingest_facts
+
+        num_facts = ingest_facts(ticker, settings=settings)["facts"]
+    except Exception:  # noqa: BLE001
+        progress("XBRL figures unavailable for this company — "
+                 "numeric questions will fall back to filing text.")
+
     log_event(
         "ticker_onboarded", settings.log_path,
         ticker=ticker, company=entry["title"],
         filing_date=meta["filing_date"], num_chunks=num_chunks,
+        num_facts=num_facts,
     )
     return {
         "status": "added",
@@ -92,4 +107,5 @@ def ensure_ticker(
         "company": entry["title"],
         "filing_date": meta["filing_date"],
         "chunks": num_chunks,
+        "facts": num_facts,
     }

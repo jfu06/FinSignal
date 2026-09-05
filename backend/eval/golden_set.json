@@ -1,5 +1,5 @@
 {
-  "_comment": "Phase-1 mini golden set (design-doc §5): 30 cases — 25 narrative QA pairs whose expected_chunk_id/snippet were manually verified against the ingested corpus, plus 5 numeric-boundary cases that must get the 'not yet supported' reply. Grows toward the 30-50 target (decisions.md).",
+  "_comment": "Golden set (design-doc §5): 25 narrative QA pairs with content-verified chunk anchors; 5 numeric-boundary cases (must be HANDLED — numeric answer or graceful narrative fallback); 6 precise numeric cases with pinned expected values and accession numbers (must be COMPUTED CORRECTLY). Grows toward 30-50+.",
   "cases": [
     {
       "case_id": "gs01",
@@ -239,6 +239,78 @@
       "ticker": "MSFT",
       "question": "微软过去五年的平均研发费用是多少？",
       "expected_answer_snippet": null,
+      "expected_chunk_id": null
+    },
+    {
+      "case_id": "gn01",
+      "kind": "numeric",
+      "ticker": "AAPL",
+      "question": "What was Apple's total revenue in fiscal year 2025?",
+      "expected_substrings": [
+        "416.2"
+      ],
+      "expected_accn": "0000320193-25-000079",
+      "expected_answer_snippet": "416.2",
+      "expected_chunk_id": null
+    },
+    {
+      "case_id": "gn02",
+      "kind": "numeric",
+      "ticker": "AAPL",
+      "question": "What was Apple's gross margin in fiscal 2025?",
+      "expected_substrings": [
+        "46.9"
+      ],
+      "expected_accn": null,
+      "expected_answer_snippet": "46.9",
+      "expected_chunk_id": null
+    },
+    {
+      "case_id": "gn03",
+      "kind": "numeric",
+      "ticker": "AAPL",
+      "question": "What was Apple's Q4 revenue in fiscal 2025?",
+      "expected_substrings": [
+        "102.5"
+      ],
+      "expected_accn": null,
+      "expected_answer_snippet": "102.5",
+      "expected_chunk_id": null
+    },
+    {
+      "case_id": "gn04",
+      "kind": "numeric",
+      "ticker": "MSFT",
+      "question": "How much revenue did Microsoft report for fiscal year 2026?",
+      "expected_substrings": [
+        "331.8"
+      ],
+      "expected_accn": "0001193125-26-323660",
+      "expected_answer_snippet": "331.8",
+      "expected_chunk_id": null
+    },
+    {
+      "case_id": "gn05",
+      "kind": "numeric",
+      "ticker": "TSLA",
+      "question": "特斯拉 2025 财年的总营收是多少？",
+      "expected_substrings": [
+        "94.8"
+      ],
+      "expected_accn": "0001628280-26-003952",
+      "expected_answer_snippet": "94.8",
+      "expected_chunk_id": null
+    },
+    {
+      "case_id": "gn06",
+      "kind": "numeric",
+      "ticker": "AAPL",
+      "question": "How much did Apple's revenue grow in fiscal 2025 versus fiscal 2024?",
+      "expected_substrings": [
+        "6.4"
+      ],
+      "expected_accn": null,
+      "expected_answer_snippet": "6.4",
       "expected_chunk_id": null
     }
   ]

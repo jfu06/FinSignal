@@ -57,13 +57,37 @@ class TestEnsureTicker:
                             lambda t, cik: Path("/fake/NVDA_10K.txt"))
         monkeypatch.setattr(onboarding, "ingest_file",
                             lambda path, settings: 300)
+        import app.xbrl as xbrl
+        monkeypatch.setattr(xbrl, "ingest_facts",
+                            lambda t, settings: {"facts": 27281})
         result = onboarding.ensure_ticker(
             "NVDA", settings=make_settings(tmp_path), progress=steps.append)
         assert result == {
             "status": "added", "ticker": "NVDA", "company": "NVIDIA Corp",
-            "filing_date": "2026-02-26", "chunks": 300,
+            "filing_date": "2026-02-26", "chunks": 300, "facts": 27281,
         }
-        assert len(steps) == 4  # resolve, locate, download, ingest
+        assert len(steps) == 5  # resolve, locate, download, ingest, xbrl
+
+    def test_xbrl_failure_does_not_block_onboarding(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(onboarding, "known_tickers", lambda s: set())
+        monkeypatch.setattr(onboarding, "resolve_ticker",
+                            lambda t: FAKE_MAP["NVDA"])
+        monkeypatch.setattr(onboarding, "latest_10k",
+                            lambda cik: {"filing_date": "2026-02-26"})
+        monkeypatch.setattr(onboarding, "download_10k",
+                            lambda t, cik: __import__("pathlib").Path("/f.txt"))
+        monkeypatch.setattr(onboarding, "ingest_file",
+                            lambda path, settings: 300)
+        import app.xbrl as xbrl
+
+        def boom(t, settings):
+            raise RuntimeError("SEC hiccup")
+
+        monkeypatch.setattr(xbrl, "ingest_facts", boom)
+        result = onboarding.ensure_ticker(
+            "NVDA", settings=make_settings(tmp_path))
+        assert result["status"] == "added"   # document line still succeeded
+        assert result["facts"] == 0
 
     def test_unknown_ticker_error_propagates(self, monkeypatch, tmp_path):
         monkeypatch.setattr(onboarding, "known_tickers", lambda s: set())
