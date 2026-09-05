@@ -279,10 +279,18 @@ def render_report(report: dict, key: str) -> None:
             for s in r["sources"]
             if s["accn"] not in seen_accn and not seen_accn.add(s["accn"])
         )
-        # exact XBRL concepts: searchable in the SEC iXBRL viewer the link opens
+        # Exact XBRL concept + full-precision reported value: search the tag
+        # in the iXBRL viewer the link opens, then match the digits — the
+        # consolidated fact matches exactly; dimensional slices (e.g.
+        # Product-only revenue under the same tag) won't.
+        def _fact(s: dict) -> str:
+            out = f"`{s['tag']}`"
+            if s.get("raw_value") is not None:
+                v = s["raw_value"]
+                out += f" = {v:,.0f}" if v == int(v) else f" = {v:,.2f}"
+            return out + f" ({s['period_end']})"
         tags = " · ".join(dict.fromkeys(
-            f"`{s['tag']}` ({s['period_end']})"
-            for s in r["sources"] if s.get("tag")))
+            _fact(s) for s in r["sources"] if s.get("tag")))
         if links:
             st.caption(f"Source: {links}" + (f" — {tags}" if tags else ""))
 
