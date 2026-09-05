@@ -61,6 +61,14 @@ _ROUTE_TOOL = {
                     "required": ["op", "metric"],
                 },
             },
+            "companies": {
+                "type": "array", "items": {"type": "string"},
+                "description": (
+                    "US ticker symbols for EVERY company the question "
+                    "mentions, resolving names in any language "
+                    "(苹果/Apple -> AAPL, 英伟达 -> NVDA). Empty if none."
+                ),
+            },
             "reason": {"type": "string"},
         },
         "required": ["route", "reason"],
@@ -88,6 +96,9 @@ given tickers), ratio.
 When the question compares companies ("A vs B", "who spends more"), you MUST
 use op="compare" with tickers listing EVERY company mentioned.\
 
+
+ALWAYS fill "companies" with the tickers of every company the question
+mentions (any language); leave it empty when no company is named.
 
 CRITICAL: if the asked quantity is NOT in the registry (product-line or
 segment revenue, stock price, P/E, guidance), do NOT force a metric — route
@@ -123,7 +134,8 @@ def route_question(
         payload = RoutePayload.from_tool_input(
             tool_use.input if tool_use is not None else None)
         result = {"route": payload.route,
-                  "queries": [q.model_dump() for q in payload.queries]}
+                  "queries": [q.model_dump() for q in payload.queries],
+                  "companies": payload.companies}
         log_event(
             "llm_call", settings.log_path,
             query_id=query_id, stage="route", model=settings.assess_model,
@@ -133,7 +145,7 @@ def route_question(
             output_tokens=response.usage.output_tokens,
         )
     except Exception:  # noqa: BLE001 — routing must never break the pipeline
-        result = {"route": "narrative", "queries": []}
+        result = {"route": "narrative", "queries": [], "companies": []}
     if result["route"] in ("numeric", "hybrid") and not result["queries"]:
         result["route"] = "narrative"  # numeric with nothing to run = narrative
     return result

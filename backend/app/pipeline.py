@@ -40,6 +40,7 @@ from .db import connect
 from .generation import generate_answer
 from .logging_utils import log_event
 from .models import Chunk, Claim, Verdict
+from .edgar import EdgarError, resolve_ticker
 from .refinement import RefinementTrace, retrieve_refined
 from .router import execute_numeric, route_question
 from .verification import verify_claims_batch
@@ -74,6 +75,7 @@ class PipelineState(TypedDict, total=False):
     ticker: str
     query_id: str
     route: str                     # narrative | numeric | hybrid
+    needs_onboarding: str          # ticker mentioned but not in the corpus
     numeric_queries: list[dict]
     numeric_results: list[dict]
     chunks: list[Chunk]
@@ -153,13 +155,47 @@ def build_graph(settings: Settings):
             state["question"], state["ticker"],
             settings=settings, query_id=state["query_id"],
         )
+        # Free-form company detection: a company mentioned in the question
+        # beats the sidebar/default ticker (FinChat-style UX). If the default
+        # ticker is itself among the mentions, keep it (e.g. comparisons).
+        resolved = state["ticker"]
+        needs = ""
+        mentioned = decision.get("companies") or []
+        if mentioned and resolved not in mentioned:
+            known = _known_tickers(settings)
+            in_corpus = next((c for c in mentioned if c in known), None)
+            if in_corpus:
+                resolved = in_corpus
+            else:
+                candidate = mentioned[0]
+                try:
+                    resolve_ticker(candidate)  # real US listing?
+                    needs = candidate          # valid but not onboarded yet
+                except EdgarError:
+                    pass                       # hallucinated -> keep default
         log_event(
             "routed", settings.log_path,
             query_id=state["query_id"], route=decision["route"],
-            queries=decision["queries"],
+            queries=decision["queries"], companies=mentioned,
+            resolved_ticker=resolved, needs_onboarding=needs or None,
         )
         return {"route": decision["route"],
-                "numeric_queries": decision["queries"]}
+                "numeric_queries": decision["queries"],
+                "ticker": resolved,
+                "needs_onboarding": needs}
+
+    def onboarding_required(state: PipelineState) -> PipelineState:
+        tk = state["needs_onboarding"]
+        return {"report": {
+            "query_id": state["query_id"],
+            "ticker": tk,
+            "question": state["question"],
+            "needs_onboarding": tk,
+            "message": (
+                f"{tk} isn't in the corpus yet. Add it (about a minute) and "
+                f"I'll answer from its latest 10-K."
+            ),
+        }}
 
     def numeric_node(state: PipelineState) -> PipelineState:
         results = execute_numeric(
@@ -257,6 +293,8 @@ def build_graph(settings: Settings):
         return {"report": report}
 
     def route_after_router(state: PipelineState) -> str:
+        if state.get("needs_onboarding"):
+            return "onboard"
         return "narrative" if state["route"] == "narrative" else "numeric"
 
     def route_after_numeric(state: PipelineState) -> str:
@@ -273,6 +311,7 @@ def build_graph(settings: Settings):
 
     graph = StateGraph(PipelineState)
     graph.add_node("route_question", route_node)
+    graph.add_node("onboarding_required", onboarding_required)
     graph.add_node("run_numeric", numeric_node)
     graph.add_node("assemble_numeric", assemble_numeric)
     graph.add_node("retrieve", retrieve)
@@ -284,8 +323,10 @@ def build_graph(settings: Settings):
     graph.add_edge(START, "route_question")
     graph.add_conditional_edges(
         "route_question", route_after_router,
-        {"narrative": "retrieve", "numeric": "run_numeric"},
+        {"narrative": "retrieve", "numeric": "run_numeric",
+         "onboard": "onboarding_required"},
     )
+    graph.add_edge("onboarding_required", END)
     graph.add_conditional_edges(
         "run_numeric", route_after_numeric,
         {"assemble_numeric": "assemble_numeric", "narrative": "retrieve"},

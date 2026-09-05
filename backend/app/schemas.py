@@ -191,21 +191,29 @@ class RoutePayload(BaseModel):
 
     route: Literal["narrative", "numeric", "hybrid"] = "narrative"
     queries: list[RouteQuery] = Field(default_factory=list)
+    companies: list[str] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
     def _coerce(cls, data: object) -> dict:
         if not isinstance(data, dict):
-            return {"route": "narrative", "queries": []}
+            return {"route": "narrative", "queries": [], "companies": []}
         route = data.get("route")
         if route not in ("narrative", "numeric", "hybrid"):
             route = "narrative"
         queries = data.get("queries")
         if not isinstance(queries, list):
             queries = []
-        return {"route": route, "queries": [
-            q for q in queries if isinstance(q, dict) and q.get("metric")
-        ]}
+        companies = data.get("companies")
+        if not isinstance(companies, list):
+            companies = []
+        return {
+            "route": route,
+            "queries": [q for q in queries
+                        if isinstance(q, dict) and q.get("metric")],
+            "companies": [c.strip().upper() for c in companies
+                          if isinstance(c, str) and c.strip()],
+        }
 
     @classmethod
     def from_tool_input(cls, raw: object) -> "RoutePayload":

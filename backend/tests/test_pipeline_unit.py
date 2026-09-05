@@ -152,49 +152,57 @@ class TestVerifyClaimsBatch:
         assert FakeAnthropic.calls == []
 
 
+@pytest.fixture
+def wired(monkeypatch, tmp_path):
+    """Wire pipeline internals to fakes; returns a mutable test harness."""
+
+    state = {"generate_calls": 0, "verify_batches": [], "persisted": []}
+    chunk = make_chunk()
+
+    monkeypatch.setattr(pipeline, "_known_tickers", lambda s: {"AAPL"})
+    monkeypatch.setattr(
+        pipeline, "retrieve_refined",
+        lambda q, t, settings, query_id: (
+            [chunk], RefinementTrace(rounds=1, final_query=q, final_k=6)),
+    )
+    # default routing: narrative, no numeric queries; tests override state
+    state["route"] = {"route": "narrative", "queries": [],
+                      "companies": []}
+    monkeypatch.setattr(pipeline, "route_question",
+                        lambda q, t, settings, query_id: state["route"])
+    # SEC registry mock: MSFT/NVDA are real listings, others are not
+    def fake_resolve(tk):
+        if tk in ("MSFT", "NVDA"):
+            return {"cik": "1", "title": tk}
+        raise pipeline.EdgarError("unknown")
+    monkeypatch.setattr(pipeline, "resolve_ticker", fake_resolve)
+    monkeypatch.setattr(pipeline, "execute_numeric",
+                        lambda queries, t, settings: state.get("numeric", []))
+    monkeypatch.setattr(pipeline, "_persist_claims",
+                        lambda claims, s: state["persisted"].append(list(claims)))
+
+    def fake_generate(query_id, question, chunks, settings, feedback=None):
+        state["generate_calls"] += 1
+        claim = Claim(claim_id=f"{query_id}_claim1", query_id=query_id,
+                      text="t", cited_chunk_ids=["c1"])
+        return "summary", [claim]
+
+    # first batch: CONTRADICTED (forces regen); second batch: SUPPORTED
+    verdict_script = [Verdict.CONTRADICTED, Verdict.SUPPORTED]
+
+    def fake_verify(claims, chunks_by_id, settings):
+        verdict = verdict_script[len(state["verify_batches"])]
+        for c in claims:
+            c.verdict, c.judge_reason = verdict, "scripted"
+        state["verify_batches"].append([c.claim_id for c in claims])
+        return claims
+
+    monkeypatch.setattr(pipeline, "generate_answer", fake_generate)
+    monkeypatch.setattr(pipeline, "verify_claims_batch", fake_verify)
+    return state, make_settings(tmp_path)
+
+
 class TestAnswerQuestionOrchestration:
-    @pytest.fixture
-    def wired(self, monkeypatch, tmp_path):
-        """Wire pipeline internals to fakes; returns a mutable test harness."""
-
-        state = {"generate_calls": 0, "verify_batches": [], "persisted": []}
-        chunk = make_chunk()
-
-        monkeypatch.setattr(pipeline, "_known_tickers", lambda s: {"AAPL"})
-        monkeypatch.setattr(
-            pipeline, "retrieve_refined",
-            lambda q, t, settings, query_id: (
-                [chunk], RefinementTrace(rounds=1, final_query=q, final_k=6)),
-        )
-        # default routing: narrative, no numeric queries; tests override state
-        state["route"] = {"route": "narrative", "queries": []}
-        monkeypatch.setattr(pipeline, "route_question",
-                            lambda q, t, settings, query_id: state["route"])
-        monkeypatch.setattr(pipeline, "execute_numeric",
-                            lambda queries, t, settings: state.get("numeric", []))
-        monkeypatch.setattr(pipeline, "_persist_claims",
-                            lambda claims, s: state["persisted"].append(list(claims)))
-
-        def fake_generate(query_id, question, chunks, settings, feedback=None):
-            state["generate_calls"] += 1
-            claim = Claim(claim_id=f"{query_id}_claim1", query_id=query_id,
-                          text="t", cited_chunk_ids=["c1"])
-            return "summary", [claim]
-
-        # first batch: CONTRADICTED (forces regen); second batch: SUPPORTED
-        verdict_script = [Verdict.CONTRADICTED, Verdict.SUPPORTED]
-
-        def fake_verify(claims, chunks_by_id, settings):
-            verdict = verdict_script[len(state["verify_batches"])]
-            for c in claims:
-                c.verdict, c.judge_reason = verdict, "scripted"
-            state["verify_batches"].append([c.claim_id for c in claims])
-            return claims
-
-        monkeypatch.setattr(pipeline, "generate_answer", fake_generate)
-        monkeypatch.setattr(pipeline, "verify_claims_batch", fake_verify)
-        return state, make_settings(tmp_path)
-
     def test_contradicted_triggers_exactly_one_regeneration(self, wired):
         state, settings = wired
         report = pipeline.answer_question("why?", "AAPL", settings=settings,
@@ -250,6 +258,49 @@ class TestAnswerQuestionOrchestration:
         assert state["generate_calls"] >= 1          # RAG ran
         assert report["numeric"][0]["text"] == "AAPL revenue +6.4% YoY"
         assert report["claims"]                      # narrative too
+
+
+class TestCompanyDetection:
+    def test_mentioned_corpus_company_overrides_default(self, wired, monkeypatch):
+        state, settings = wired
+        import app.pipeline as pipeline
+        monkeypatch.setattr(pipeline, "_known_tickers",
+                            lambda s: {"AAPL", "MSFT"})
+        state["route"] = {"route": "narrative", "queries": [],
+                          "companies": ["MSFT"]}
+        report = pipeline.answer_question("How does Microsoft make money?",
+                                          "AAPL", settings=settings)
+        assert report["ticker"] == "MSFT"      # switched off the default
+        assert report["claims"]
+
+    def test_default_kept_when_mentioned_alongside_others(self, wired, monkeypatch):
+        state, settings = wired
+        import app.pipeline as pipeline
+        monkeypatch.setattr(pipeline, "_known_tickers",
+                            lambda s: {"AAPL", "MSFT"})
+        state["route"] = {"route": "narrative", "queries": [],
+                          "companies": ["AAPL", "MSFT"]}
+        report = pipeline.answer_question("Compare Apple and Microsoft",
+                                          "AAPL", settings=settings)
+        assert report["ticker"] == "AAPL"      # default is among mentions
+
+    def test_valid_but_unonboarded_company_asks_for_onboarding(self, wired):
+        state, settings = wired
+        state["route"] = {"route": "narrative", "queries": [],
+                          "companies": ["NVDA"]}
+        report = pipeline.answer_question("What does Nvidia do?",
+                                          "AAPL", settings=settings)
+        assert report["needs_onboarding"] == "NVDA"
+        assert state["generate_calls"] == 0    # pipeline stopped early
+
+    def test_hallucinated_symbol_falls_back_to_default(self, wired):
+        state, settings = wired
+        state["route"] = {"route": "narrative", "queries": [],
+                          "companies": ["ZZZZ"]}
+        report = pipeline.answer_question("What does Zorbcorp do?",
+                                          "AAPL", settings=settings)
+        assert report["ticker"] == "AAPL"      # kept the default, answered
+        assert report["claims"]
 
 
 class TestGraphStructure:

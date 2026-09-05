@@ -174,6 +174,10 @@ history: list[dict] = st.session_state.setdefault("chat", [])
 def render_report(report: dict, key: str) -> None:
     """Render one verified report inside an assistant chat bubble."""
 
+    if report.get("needs_onboarding"):
+        st.info(report.get("message", "Company not onboarded yet."))
+        return
+
     if report.get("supported", True) is False:
         st.warning(
             "Numeric/aggregation questions (averages, growth rates, CAGR, "
@@ -336,7 +340,7 @@ if st.button(f"📊 Generate {ticker} annual report digest (~2 min)",
                     s.update(label="Digest failed", state="error")
                     st.error(f"Digest failed, please retry. ({exc})")
 
-prompt = st.chat_input(f"Ask about {ticker}… (any language, follow-ups OK)")
+prompt = st.chat_input(f"Ask about {ticker} or ANY company… (any language, follow-ups OK)")
 if prompt and prompt.strip():
     prompt = prompt.strip()
     # --- usage guardrails: per-session limit + global daily budget ---
@@ -371,9 +375,22 @@ if prompt and prompt.strip():
                         prompt, qa_history, settings=settings()
                     )
                     turn["standalone"] = standalone
-                    turn["report"] = answer_question(
+                    report = answer_question(
                         standalone, ticker, settings=settings()
                     )
+                    if report.get("needs_onboarding"):
+                        # Question mentions a company we don't have yet:
+                        # onboard it inline, then answer for real.
+                        tk = report["needs_onboarding"]
+                        st.write(f"➕ {tk} isn't in the corpus — adding it…")
+                        ensure_ticker(tk, settings=settings(),
+                                      progress=st.write)
+                        tickers.clear()
+                        turn["ticker"] = tk
+                        report = answer_question(
+                            standalone, tk, settings=settings()
+                        )
+                    turn["report"] = report
                 except PipelineError as exc:
                     turn["error"] = f"Invalid input: {exc}"
                 except Exception as exc:  # noqa: BLE001

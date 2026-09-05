@@ -130,7 +130,7 @@ class TestRouteQuestion:
     def test_llm_failure_fails_open_to_narrative(self, tmp_path):
         FakeAnthropic.queue = []  # client will blow up
         r = route_question("q?", "AAPL", make_settings(tmp_path))
-        assert r == {"route": "narrative", "queries": []}
+        assert r == {"route": "narrative", "queries": [], "companies": []}
 
     def test_numeric_with_no_queries_collapses_to_narrative(self, tmp_path):
         FakeAnthropic.queue = [tool_response({
