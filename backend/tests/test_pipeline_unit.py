@@ -160,7 +160,7 @@ def wired(monkeypatch, tmp_path):
     chunk = make_chunk()
 
     monkeypatch.setattr(pipeline, "_known_tickers", lambda s: {"AAPL"})
-    def fake_retrieve(q, t, settings, query_id, doc_id=None):
+    def fake_retrieve(q, t, settings, query_id, doc_id=None, coverage=False):
         state["retrieve_doc_id"] = doc_id
         return [chunk], RefinementTrace(rounds=1, final_query=q, final_k=6)
 
@@ -382,3 +382,32 @@ class TestSmallHelpers:
         c2.judge_reason = "conflicts"
         fb = pipeline._contradiction_feedback([c1, c2])
         assert "bad" in fb and "good" not in fb
+
+
+class TestCoverageDetection:
+    def test_enumeration_asks_detected(self):
+        for q in ["What are the biggest risk factors?",
+                  "Who are Apple's main competitors?",
+                  "List all business segments",
+                  "特斯拉的主要风险有哪些？"]:
+            assert pipeline.is_coverage_question(q), q
+
+    def test_factual_and_numeric_asks_not_detected(self):
+        for q in ["What was FY2025 revenue?",
+                  "How much cash was spent on buybacks?",
+                  "Did profitability improve?"]:
+            assert not pipeline.is_coverage_question(q), q
+
+
+class TestMMR:
+    def test_diversifies_away_from_near_duplicates(self):
+        from app.retrieval import _mmr
+        # rows: (id, doc, ticker, section, text, embedding, distance)
+        mk = lambda i, emb, d: (f"c{i}", "d", "T", "s", "t", emb, d)
+        rows = [
+            mk(0, [1.0, 0.0], 0.00),   # best match
+            mk(1, [0.999, 0.04], 0.01),  # near-duplicate of c0
+            mk(2, [0.0, 1.0], 0.30),   # different topic
+        ]
+        picked = [r[0] for r in _mmr(rows, k=2)]
+        assert picked == ["c0", "c2"]  # duplicate skipped for the new topic

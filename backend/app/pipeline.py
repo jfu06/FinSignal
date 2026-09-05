@@ -57,6 +57,30 @@ _NUMERIC_PATTERNS = [
 ]
 _NUMERIC_RE = re.compile("|".join(_NUMERIC_PATTERNS), re.IGNORECASE)
 
+# Coverage/enumeration questions: the answer is a LIST whose quality is
+# breadth ("biggest risk factors", "main competitors", "all segments").
+# Flat top-k retrieval optimizes similarity, not coverage — these get a
+# doubled, MMR-diversified retrieval and an honest no-ranking note.
+_COVERAGE_PATTERNS = [
+    r"risk factors?", r"\brisks\b", r"风险",
+    r"competitors?|competition|competitive", r"竞争",
+    r"segments?|business lines?|product lines?", r"板块|业务线",
+    r"what are (?:the |its |their )?(?:biggest|largest|main|key|top|major|primary)",
+    r"list (?:the|all|its)\b", r"最大的|主要的|哪些",
+]
+_COVERAGE_RE = re.compile("|".join(_COVERAGE_PATTERNS), re.IGNORECASE)
+
+COVERAGE_NOTE = (
+    "10-K filings list items like risks without ranking them by severity — "
+    "the points below reflect the filing's coverage, in no particular order."
+)
+
+
+def is_coverage_question(question: str) -> bool:
+    """True for enumeration asks whose answer quality is breadth."""
+
+    return bool(_COVERAGE_RE.search(question))
+
 class PipelineError(ValueError):
     """Invalid user input (unknown ticker, empty question, …)."""
 
@@ -70,6 +94,7 @@ class PipelineState(TypedDict, total=False):
     doc_id: str                    # benchmark/oracle-document mode: pin retrieval
     numeric_scope: dict            # oracle-doc numeric: {"cik", "accn"}
     route: str                     # narrative | numeric | hybrid
+    coverage: bool                 # enumeration ask -> diversified retrieval
     needs_onboarding: str          # ticker mentioned but not in the corpus
     numeric_queries: list[dict]
     numeric_results: list[dict]
@@ -242,12 +267,14 @@ def build_graph(settings: Settings):
 
     def retrieve(state: PipelineState) -> PipelineState:
         # Bounded agentic refinement loop (see app.refinement).
+        coverage = is_coverage_question(state["question"])
         chunks, trace = retrieve_refined(
             state["question"], state["ticker"],
             settings=settings, query_id=state["query_id"],
             doc_id=state.get("doc_id") or None,
+            coverage=coverage,
         )
-        return {"chunks": chunks, "refinement": trace}
+        return {"chunks": chunks, "refinement": trace, "coverage": coverage}
 
     def generate(state: PipelineState) -> PipelineState:
         # Second pass gets an "r" suffix so both attempts stay on record.
@@ -286,6 +313,8 @@ def build_graph(settings: Settings):
             state["summary"], state["claims"], state["chunks"],
         )
         report["retrieved_chunk_ids"] = [c.chunk_id for c in state["chunks"]]
+        if state.get("coverage"):
+            report["coverage_note"] = COVERAGE_NOTE
         if state.get("numeric_results"):  # hybrid: verified figures alongside
             report["numeric"] = state["numeric_results"]
         trace = state["refinement"]

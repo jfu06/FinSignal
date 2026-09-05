@@ -33,7 +33,9 @@ _CREDIBILITY: dict[Verdict, float] = {
     Verdict.CONTRADICTED: 0.0,
 }
 
-_PREVIEW_CHARS = 200
+# Full chunk text: a truncated preview once hid the supporting sentence
+# (pandemic language sat at char ~350 of a cited chunk), making a correct
+# citation look fabricated. Chunks are ~1KB; ship the whole thing.
 
 
 def unsupported_rate(claims: list[Claim]) -> float:
@@ -54,7 +56,7 @@ def _citation(chunk: Chunk) -> dict[str, Any]:
         "chunk_id": chunk.chunk_id,
         "doc_id": chunk.doc_id,
         "section": chunk.section,
-        "preview": chunk.text[:_PREVIEW_CHARS],
+        "preview": chunk.text,
     }
 
 

@@ -38,6 +38,7 @@ from app.pipeline import PipelineError, answer_question  # noqa: E402
 from app.digest import DIGEST_QUERY_COST, digest_summary, generate_digest  # noqa: E402
 from app.followup import condense_followup  # noqa: E402
 from app.smoke_eval import load_smoke_result, run_smoke_eval  # noqa: E402
+from app.span_overlap import token_overlap  # noqa: E402
 from app.usage import daily_budget_left  # noqa: E402
 
 st.set_page_config(page_title="FinSignal", page_icon="📑", layout="wide")
@@ -301,6 +302,8 @@ def render_report(report: dict, key: str) -> None:
     if report["summary"] and not (report.get("numeric")
                                   and not report["claims"]):
         st.markdown(report["summary"])
+    if report.get("coverage_note"):
+        st.caption(f"ℹ️ {report['coverage_note']}")
     ok_claims = [c for c in report["claims"] if not c["unverified"]]
     warn_claims = [c for c in report["claims"] if c["unverified"]]
     if report["claims"]:
@@ -357,7 +360,7 @@ def render_report(report: dict, key: str) -> None:
 def render_claim(c: dict) -> None:
     kind_badge = "🚩 Risk" if c["kind"] == "risk" else "💡 Insight"
     verified_badge = "⚠️ Unverified" if c["unverified"] else "✅ Verified"
-    meta = f"{kind_badge} · {verified_badge} · credibility {c['credibility']:.1f}"
+    meta = f"{kind_badge} · {verified_badge}"
     span = c.get("span_overlap") or {}
     if span.get("flagged"):
         meta += " · ⚑ figures not found verbatim in citations — review advised"
@@ -374,7 +377,36 @@ def render_claim(c: dict) -> None:
     for cite in c["citations"]:
         section = cite.get("section") or "(no section label)"
         with st.expander(f"📄 View source — {cite['chunk_id']} · {section}"):
-            st.text(cite["preview"])
+            st.markdown(_highlight_support(c["text"], cite["preview"]),
+                        unsafe_allow_html=True)
+
+
+_SENT_SPLIT = __import__("re").compile(r"(?<=[.!?。？！])\s+")
+
+
+def _highlight_support(claim_text: str, chunk_text: str) -> str:
+    """Full chunk text with the sentence best supporting the claim marked.
+
+    The old 200-char preview could cut the supporting sentence entirely,
+    making a correct citation look fabricated. Best-overlap sentence gets
+    a <mark>; ties/no-overlap degrade to plain full text.
+    """
+
+    sentences = _SENT_SPLIT.split(chunk_text)
+    best_i, best_score = -1, 0.0
+    for i, s in enumerate(sentences):
+        score = token_overlap(claim_text, s) or 0.0
+        if score > best_score:
+            best_i, best_score = i, score
+    parts = []
+    for i, s in enumerate(sentences):
+        esc = html_lib.escape(s)
+        if i == best_i and best_score >= 0.3:
+            esc = (f'<mark style="background:#FDF0C8; padding:1px 2px; '
+                   f'border-radius:3px;">{esc}</mark>')
+        parts.append(esc)
+    return (f'<div style="font-size:0.9rem; line-height:1.6;">'
+            f'{" ".join(parts)}</div>')
 
 
 def render_digest(digest: dict, key: str) -> None:
