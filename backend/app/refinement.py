@@ -139,6 +139,7 @@ def retrieve_refined(
     ticker: str,
     settings: Settings | None = None,
     query_id: str | None = None,
+    doc_id: str | None = None,
 ) -> tuple[list[Chunk], RefinementTrace]:
     """Retrieve with up to MAX_ROUNDS assess-and-refine rounds.
 
@@ -154,7 +155,8 @@ def retrieve_refined(
 
     for round_no in range(1, MAX_ROUNDS + 1):
         trace.rounds = round_no
-        chunks = retrieve(query, ticker, k=k, settings=settings, query_id=query_id)
+        chunks = retrieve(query, ticker, k=k, settings=settings,
+                          query_id=query_id, doc_id=doc_id)
         for c in chunks:
             union.setdefault(c.chunk_id, c)
 

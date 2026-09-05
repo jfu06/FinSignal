@@ -160,16 +160,20 @@ def wired(monkeypatch, tmp_path):
     chunk = make_chunk()
 
     monkeypatch.setattr(pipeline, "_known_tickers", lambda s: {"AAPL"})
-    monkeypatch.setattr(
-        pipeline, "retrieve_refined",
-        lambda q, t, settings, query_id: (
-            [chunk], RefinementTrace(rounds=1, final_query=q, final_k=6)),
-    )
+    def fake_retrieve(q, t, settings, query_id, doc_id=None):
+        state["retrieve_doc_id"] = doc_id
+        return [chunk], RefinementTrace(rounds=1, final_query=q, final_k=6)
+
+    monkeypatch.setattr(pipeline, "retrieve_refined", fake_retrieve)
     # default routing: narrative, no numeric queries; tests override state
     state["route"] = {"route": "narrative", "queries": [],
                       "companies": []}
-    monkeypatch.setattr(pipeline, "route_question",
-                        lambda q, t, settings, query_id: state["route"])
+
+    def fake_route(q, t, settings, query_id):
+        state["route_calls"] = state.get("route_calls", 0) + 1
+        return state["route"]
+
+    monkeypatch.setattr(pipeline, "route_question", fake_route)
     # SEC registry mock: MSFT/NVDA are real listings, others are not
     def fake_resolve(tk):
         if tk in ("MSFT", "NVDA"):
@@ -258,6 +262,25 @@ class TestAnswerQuestionOrchestration:
         assert state["generate_calls"] >= 1          # RAG ran
         assert report["numeric"][0]["text"] == "AAPL revenue +6.4% YoY"
         assert report["claims"]                      # narrative too
+
+
+class TestOracleDocumentMode:
+    """doc_id pins retrieval and bypasses routing/ticker checks (FinanceBench)."""
+
+    def test_doc_id_skips_ticker_validation_and_router(self, wired):
+        state, settings = wired
+        report = pipeline.answer_question(
+            "capex?", "3M", settings=settings, doc_id="3M_2018_10K")
+        # "3M" is not in the live corpus ({"AAPL"}) — no PipelineError raised
+        assert report["claims"]
+        assert state["retrieve_doc_id"] == "3M_2018_10K"
+        assert state.get("route_calls", 0) == 0  # router bypassed entirely
+
+    def test_without_doc_id_router_still_runs(self, wired):
+        state, settings = wired
+        pipeline.answer_question("q?", "AAPL", settings=settings)
+        assert state["route_calls"] == 1
+        assert state["retrieve_doc_id"] is None
 
 
 class TestCompanyDetection:

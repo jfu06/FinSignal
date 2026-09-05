@@ -231,7 +231,27 @@ streamlit run ui/app.py
 
 # release-gate evaluation (exits non-zero if unsupported rate > 4%)
 python -m eval.run_eval
+
+# FinanceBench external benchmark (capability score — separate from the gate)
+python -m eval.ingest_benchmark      # one-time: fetch + ingest 64 historical 10-Ks
+python -m eval.verify_benchmark_docs # sanity: each doc contains its expert evidence
+python -m eval.run_benchmark         # 112 expert-annotated questions, graded report
 ```
+
+### FinanceBench external benchmark
+
+[FinanceBench](https://arxiv.org/abs/2311.11944) (Islam et al., 2023) is an
+expert-annotated open QA benchmark over real SEC filings. FinSignal runs its
+open-source 10-K subset — 112 questions across 64 historical 10-Ks from 31
+companies — in *oracle-document mode*: retrieval pinned to the exact filing
+each question was written against. Benchmark filings are ingested with
+`corpus='benchmark'` so they can never leak into live product retrieval.
+Answers are graded against the expert answers by a cross-vendor LLM grader
+as **correct / incorrect / abstain** (abstain = the system honestly said the
+document excerpts don't show the figure — a capability gap, not a
+hallucination). The score is reported in `eval/benchmark_report.json` and
+feeds the capability roadmap; it is intentionally NOT part of the release
+gate.
 
 ## Implementation status
 

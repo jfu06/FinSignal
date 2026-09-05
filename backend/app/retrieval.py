@@ -22,24 +22,34 @@ def retrieve(
     k: int | None = None,
     settings: Settings | None = None,
     query_id: str | None = None,
+    doc_id: str | None = None,
 ) -> list[Chunk]:
-    """Return the top-k most similar chunks for ``question`` within ``ticker``."""
+    """Top-k chunks for ``question`` — ticker-scoped over the live corpus, or
+    pinned to one document (benchmark/oracle-document mode) via ``doc_id``."""
 
     settings = settings or get_settings()
     k = k or settings.top_k
 
     qvec = Vector(embed_query(question, settings))
     with connect(settings) as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT chunk_id, doc_id, ticker, section, text
-            FROM chunks
-            WHERE ticker = %s
-            ORDER BY embedding <=> %s
-            LIMIT %s
-            """,
-            (ticker, qvec, k),
-        )
+        if doc_id:
+            cur.execute(
+                """
+                SELECT chunk_id, doc_id, ticker, section, text
+                FROM chunks WHERE doc_id = %s
+                ORDER BY embedding <=> %s LIMIT %s
+                """,
+                (doc_id, qvec, k),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT chunk_id, doc_id, ticker, section, text
+                FROM chunks WHERE ticker = %s AND corpus = 'live'
+                ORDER BY embedding <=> %s LIMIT %s
+                """,
+                (ticker, qvec, k),
+            )
         rows = cur.fetchall()
 
     chunks = [

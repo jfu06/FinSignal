@@ -133,6 +133,76 @@ def latest_10k(cik: str) -> dict:
     )
 
 
+def filing_for_fy(cik: str, fy: int, form: str = "10-K") -> dict:
+    """Locate the historical filing whose fiscal-period END falls in ``fy``.
+
+    Used by the FinanceBench benchmark ingester (doc names carry the fiscal
+    year, e.g. 3M_2018_10K → the 10-K with reportDate 2018-12-31). Matches on
+    reportDate year, which equals our FY-label convention (calendar year of
+    period end — Walmart FY2015 ends 2015-01-31 → reportDate year 2015).
+    Searches the "recent" window first, then the older paginated submission
+    files, since big filers push 2015-era filings past the 1000-row window.
+    """
+
+    def _rows(block: dict):
+        yield from zip(
+            block["form"], block["accessionNumber"], block["primaryDocument"],
+            block["filingDate"], block["reportDate"],
+        )
+
+    def _scan(block: dict, match) -> dict | None:
+        for f, acc, doc, filed, report in _rows(block):
+            if f == form and match(report or ""):
+                return {"accession": acc, "primary_doc": doc,
+                        "filing_date": filed, "report_date": report, "form": f}
+        return None
+
+    exact = lambda r: r[:4] == str(fy)  # noqa: E731
+    # Retailers with a Jan/Feb fiscal-year end label the FY by its start-side
+    # year (Ulta "FY2023" ends 2024-02-03), so accept fy+1 Q1 as a fallback.
+    spill = lambda r: (r[:4] == str(fy + 1)  # noqa: E731
+                       and r[5:7] in ("01", "02", "03"))
+
+    subs = json.loads(_get(f"https://data.sec.gov/submissions/CIK{cik}.json"))
+    blocks = [subs["filings"]["recent"]]
+    hit = _scan(blocks[0], exact)
+    # Page into older submission files only while the target year is missing —
+    # big filers push 2015-era filings past the 1000-row "recent" window.
+    if hit is None:
+        for extra in subs["filings"].get("files", []):
+            time.sleep(0.15)  # stay well under SEC's 10 req/s
+            block = json.loads(
+                _get(f"https://data.sec.gov/submissions/{extra['name']}"))
+            blocks.append(block)
+            hit = _scan(block, exact)
+            if hit is not None:
+                break
+    if hit is None:  # fiscal-year label spills into fy+1 Q1 (retail FYE)
+        for block in blocks:
+            hit = _scan(block, spill)
+            if hit is not None:
+                break
+    if hit is None:
+        raise EdgarError(f"No {form} with report year {fy} found for CIK {cik}")
+    return hit
+
+
+def download_filing_text(cik: str, accession: str, primary_doc: str) -> str:
+    """Fetch one filing's primary document and return it as plain text."""
+
+    acc_nodash = accession.replace("-", "")
+    url = (
+        f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/"
+        f"{acc_nodash}/{primary_doc}"
+    )
+    html = _get(url).decode("utf-8", errors="replace")
+    text = html_to_text(html)
+    if len(text) < 10_000:
+        raise EdgarError(f"{accession}: extracted text unusually short "
+                         f"({len(text)} chars) — not a full filing?")
+    return text
+
+
 def download_10k(ticker: str, cik: str | None = None) -> Path:
     """Download the latest 10-K as plain text into data/raw/. Returns the path."""
 

@@ -38,11 +38,18 @@ def _doc_id(ticker: str, meta_path: Path) -> str:
     return f"{ticker}_10K"
 
 
-def ingest_file(path: Path, settings: Settings) -> int:
-    """Chunk + embed + store one filing. Returns the number of chunks stored."""
+def ingest_file(path: Path, settings: Settings, corpus: str = "live",
+                doc_id: str | None = None) -> int:
+    """Chunk + embed + store one filing. Returns the number of chunks stored.
+
+    ``corpus`` isolates rows: 'live' serves the product, 'benchmark' holds
+    historical filings for the external eval suite. ``doc_id`` overrides the
+    derived id (benchmark uses FinanceBench doc names, e.g. 3M_2018_10K).
+    """
 
     ticker = path.stem.split("_")[0].upper()
-    doc_id = _doc_id(ticker, path.with_name(path.stem + ".meta.json"))
+    if doc_id is None:
+        doc_id = _doc_id(ticker, path.with_name(path.stem + ".meta.json"))
     text = path.read_text(encoding="utf-8")
 
     raw_chunks = chunk_text(text)
@@ -60,6 +67,7 @@ def ingest_file(path: Path, settings: Settings) -> int:
             c.section,
             c.text,
             Vector(v),
+            corpus,
         )
         for i, (c, v) in enumerate(zip(raw_chunks, vectors))
     ]
@@ -68,8 +76,9 @@ def ingest_file(path: Path, settings: Settings) -> int:
         cur.execute("DELETE FROM chunks WHERE doc_id = %s", (doc_id,))
         cur.executemany(
             """
-            INSERT INTO chunks (chunk_id, doc_id, ticker, section, text, embedding)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO chunks
+                (chunk_id, doc_id, ticker, section, text, embedding, corpus)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
             rows,
         )

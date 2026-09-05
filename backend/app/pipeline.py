@@ -74,6 +74,7 @@ class PipelineState(TypedDict, total=False):
     question: str
     ticker: str
     query_id: str
+    doc_id: str                    # benchmark/oracle-document mode: pin retrieval
     route: str                     # narrative | numeric | hybrid
     needs_onboarding: str          # ticker mentioned but not in the corpus
     numeric_queries: list[dict]
@@ -95,7 +96,7 @@ def is_numeric_question(question: str) -> bool:
 
 def _known_tickers(settings: Settings) -> set[str]:
     with connect(settings) as conn, conn.cursor() as cur:
-        cur.execute("SELECT DISTINCT ticker FROM chunks")
+        cur.execute("SELECT DISTINCT ticker FROM chunks WHERE corpus = 'live'")
         return {r[0] for r in cur.fetchall()}
 
 
@@ -149,6 +150,11 @@ def build_graph(settings: Settings):
     """Compile the QA pipeline as a LangGraph StateGraph."""
 
     def route_node(state: PipelineState) -> PipelineState:
+        # Oracle-document mode (external benchmark): the document is given, so
+        # company detection and the XBRL layer (live corpus only) don't apply.
+        if state.get("doc_id"):
+            return {"route": "narrative", "numeric_queries": [],
+                    "needs_onboarding": ""}
         # Phase-2 router: numeric -> metrics layer, narrative -> RAG,
         # hybrid -> both. Fails open to narrative inside route_question.
         decision = route_question(
@@ -234,6 +240,7 @@ def build_graph(settings: Settings):
         chunks, trace = retrieve_refined(
             state["question"], state["ticker"],
             settings=settings, query_id=state["query_id"],
+            doc_id=state.get("doc_id") or None,
         )
         return {"chunks": chunks, "refinement": trace}
 
@@ -348,8 +355,14 @@ def answer_question(
     ticker: str,
     settings: Settings | None = None,
     query_id: str | None = None,
+    doc_id: str | None = None,
 ) -> dict:
-    """Run the full RAG pipeline graph for one question; returns the report."""
+    """Run the full RAG pipeline graph for one question; returns the report.
+
+    ``doc_id`` switches on oracle-document mode (FinanceBench): retrieval is
+    pinned to that document, company detection and the numeric layer are
+    bypassed, and the ticker is display-only (no live-corpus membership check).
+    """
 
     settings = settings or get_settings()
     query_id = query_id or f"q{uuid.uuid4().hex[:8]}"
@@ -359,21 +372,24 @@ def answer_question(
         raise PipelineError("question must be a non-empty string")
     question = question.strip()
     ticker = (ticker or "").strip().upper()
-    known = _known_tickers(settings)
-    if ticker not in known:
-        raise PipelineError(
-            f"Unknown ticker {ticker!r}. Ingested tickers: {sorted(known)}"
-        )
+    if doc_id is None:
+        known = _known_tickers(settings)
+        if ticker not in known:
+            raise PipelineError(
+                f"Unknown ticker {ticker!r}. Ingested tickers: {sorted(known)}"
+            )
 
     log_event(
         "query_received", settings.log_path,
         query_id=query_id, ticker=ticker, question=question,
+        doc_id=doc_id,
     )
 
     started = time.monotonic()
     graph = build_graph(settings)
     final_state = graph.invoke(
-        {"question": question, "ticker": ticker, "query_id": query_id}
+        {"question": question, "ticker": ticker, "query_id": query_id,
+         "doc_id": doc_id or ""}
     )
     report = final_state["report"]
     report["latency_s"] = round(time.monotonic() - started, 1)

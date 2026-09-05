@@ -20,5 +20,8 @@ backend/logs/*.jsonl
 backend/data/raw/*
 !backend/data/raw/.gitkeep
 
+# --- FinanceBench: dataset jsonl is committed; fetched filing text is not ---
+backend/data/benchmark/raw/
+
 # --- OS ---
 .DS_Store

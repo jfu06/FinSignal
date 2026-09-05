@@ -26,8 +26,8 @@ def rec_retrieve(monkeypatch):
     calls: list[dict] = []
     script: list[list[Chunk]] = []
 
-    def fake(query, ticker, k, settings, query_id):  # noqa: ANN001
-        calls.append({"query": query, "k": k})
+    def fake(query, ticker, k, settings, query_id, doc_id=None):  # noqa: ANN001
+        calls.append({"query": query, "k": k, "doc_id": doc_id})
         return script.pop(0) if script else [chunk("c1")]
 
     monkeypatch.setattr(refinement, "retrieve", fake)

@@ -15,10 +15,17 @@ CREATE TABLE IF NOT EXISTS chunks (
     section    TEXT,                       -- filing section/heading, may be NULL
     text       TEXT NOT NULL,
     embedding  vector(384) NOT NULL,
+    corpus     TEXT NOT NULL DEFAULT 'live',  -- 'live' | 'benchmark'
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS chunks_ticker_idx ON chunks (ticker);
+
+-- Corpus isolation (idempotent migration for pre-existing databases):
+-- 'live' rows serve the product; 'benchmark' rows hold historical filings for
+-- the external FinanceBench suite and must never surface in ticker-scoped
+-- retrieval (retrieval.py and _known_tickers filter on corpus = 'live').
+ALTER TABLE chunks ADD COLUMN IF NOT EXISTS corpus TEXT NOT NULL DEFAULT 'live';
 
 -- NO ANN index at this corpus size: exact scan over ~800 rows is fast and
 -- always correct. An ivfflat index built before/while the table fills has
