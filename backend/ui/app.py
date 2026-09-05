@@ -80,6 +80,18 @@ code, pre, .fs-mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
 }
 .fs-claim.warn { border-left-color: #C99A3B; background: #FDFBF4; }
 .fs-claim-meta { color: #75808A; font-size: 0.76rem; margin-top: 6px; }
+
+.fs-cat {
+  font-size: 0.78rem; font-weight: 700; letter-spacing: 0.03em;
+  text-transform: uppercase; margin: 4px 0 6px;
+}
+.fs-cat small { display:block; font-weight: 400; text-transform: none;
+  letter-spacing: 0; color: #75808A; margin-top: 1px; }
+.fs-cat.num { color: #8A5210; }
+.fs-cat.doc { color: #0E6A60; }
+.fs-cat.hyb { color: #4A5490; }
+.fs-step { color: #5D6771; font-size: 0.9rem; margin-bottom: 10px; }
+.fs-step b { color: #1F262B; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -137,7 +149,9 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.write("")
-    ticker = st.selectbox("Company (ticker)", tickers())
+    ticker = st.selectbox("1️⃣ Pick a company", tickers(),
+                          help="Every question below is answered for this "
+                               "company unless you name another one.")
 
     if ticker not in EVAL_COVERED:
         smoke = load_smoke_result(ticker)
@@ -454,21 +468,44 @@ for i, turn in enumerate(history):
             render_report(turn["report"], key=turn["report"]["query_id"])
 
 if not history:
-    st.caption(
-        "Ask anything about a company's 10-K — any language, follow-ups "
-        "welcome. Try one of these:"
+    st.markdown(
+        f'<div class="fs-step"><b>1️⃣ Pick a company</b> in the sidebar '
+        f'(currently <b>{ticker}</b>) &nbsp;→&nbsp; '
+        f'<b>2️⃣ Start from a common question</b> below, or type your own '
+        f'in any language.</div>',
+        unsafe_allow_html=True,
     )
-    _EXAMPLES = [
-        "What was Apple's FY2025 revenue, and how fast is it growing?",
-        "What are Tesla's biggest risk factors?",
-        "How much does Microsoft spend on R&D, and why?",
-        "英伟达最近一年营收增长的驱动因素是什么？",
+    # Generic templates — no company names: the selected ticker is filled
+    # in automatically, so switching companies never leaves a stale example.
+    _CATEGORIES = [
+        ("num", "🔢 Figures — computed",
+         "official XBRL data, ~3 s",
+         ["What was last fiscal year's revenue, and how fast did it grow?",
+          "What is the 3-year trend in gross margin?",
+          "How much cash was spent on share buybacks?"]),
+        ("doc", "📄 From the filing — verified",
+         "every claim cited & checked, ~40 s",
+         ["What are the biggest risk factors?",
+          "What drove revenue growth last year?",
+          "How does management describe the competitive landscape?"]),
+        ("hyb", "🔢+📄 Both",
+         "figures + verified explanation",
+         ["How much was spent on R&D, and what is it going toward?",
+          "Did profitability improve, and what explains the change?",
+          "How large is the debt load, and how is it managed?"]),
     ]
-    cols = st.columns(2)
-    for i, q in enumerate(_EXAMPLES):
-        if cols[i % 2].button(q, key=f"ex_{i}", use_container_width=True):
-            st.session_state["queued_q"] = q
-            st.rerun()
+    cols = st.columns(3)
+    for col, (css, title, hint, questions) in zip(cols, _CATEGORIES):
+        with col:
+            st.markdown(
+                f'<div class="fs-cat {css}">{title}'
+                f'<small>{hint}</small></div>',
+                unsafe_allow_html=True,
+            )
+            for i, q in enumerate(questions):
+                if st.button(q, key=f"ex_{css}_{i}", use_container_width=True):
+                    st.session_state["queued_q"] = q
+                    st.rerun()
 
 # --- one-click digest (cold-start entry point) ---
 if st.button(f"📊 Generate {ticker} annual report digest (~2 min)",
