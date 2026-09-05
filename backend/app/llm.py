@@ -39,3 +39,23 @@ def anthropic_client(settings: Settings, max_retries: int = 4) -> anthropic.Anth
         return wrap_anthropic(client)
     except Exception:  # noqa: BLE001 — tracing must never break the pipeline
         return client
+
+
+def openai_client(settings: Settings, max_retries: int = 4):
+    """OpenAI client (cross-vendor judge), LangSmith-wrapped when tracing is on.
+
+    Imported lazily so the default anthropic-only configuration never touches
+    the openai package at runtime.
+    """
+
+    from openai import OpenAI
+
+    client = OpenAI(api_key=settings.openai_api_key, max_retries=max_retries)
+    if not _tracing_enabled():
+        return client
+    try:
+        from langsmith.wrappers import wrap_openai
+
+        return wrap_openai(client)
+    except Exception:  # noqa: BLE001 — tracing must never break the pipeline
+        return client

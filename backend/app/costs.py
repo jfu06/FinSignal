@@ -27,13 +27,20 @@ _DEFAULT_PRICES: dict[str, tuple[float, float]] = {
     "claude-sonnet": (3.0, 15.0),
     "claude-haiku": (1.0, 5.0),
     "claude-opus": (15.0, 75.0),
+    "gpt-5-mini": (0.25, 2.0),
+    "gpt-5": (1.25, 10.0),
+    "gpt-4o-mini": (0.15, 0.6),
+    "gpt-4o": (2.5, 10.0),
 }
 
 
 def price_for(model: str) -> tuple[float, float]:
-    """(input, output) USD per MTok for a model id, by longest prefix match."""
+    """(input, output) USD per MTok for a model id, by longest prefix match.
 
-    model = (model or "").lower()
+    Accepts provider-qualified ids like ``openai:gpt-5-mini``.
+    """
+
+    model = (model or "").lower().split(":", 1)[-1]
     for prefix, (pin, pout) in sorted(_DEFAULT_PRICES.items(),
                                       key=lambda kv: -len(kv[0])):
         if model.startswith(prefix):

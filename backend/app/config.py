@@ -33,6 +33,11 @@ class Settings:
     assess_model: str
     embedding_model: str
     embedding_dim: int
+    # --- LLM-as-judge provider ("anthropic" default, or "openai" for a
+    # cross-vendor judge that avoids same-family self-preference bias) ---
+    judge_provider: str
+    judge_model: str            # empty -> llm_model (anthropic) / gpt-5-mini (openai)
+    openai_api_key: str         # required only when judge_provider == "openai"
     top_k: int
     unsupported_rate_threshold: float
     log_path: Path
@@ -94,6 +99,9 @@ def get_settings() -> Settings:
         assess_model=os.getenv("ASSESS_MODEL", "claude-haiku-4-5-20251001"),
         embedding_model=os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-small"),
         embedding_dim=_int("EMBEDDING_DIM", 384),
+        judge_provider=(os.getenv("JUDGE_PROVIDER") or "anthropic").strip().lower(),
+        judge_model=(os.getenv("JUDGE_MODEL") or "").strip(),
+        openai_api_key=(os.getenv("OPENAI_API_KEY") or "").strip(),
         top_k=_int("TOP_K", 6),
         unsupported_rate_threshold=_float("UNSUPPORTED_RATE_THRESHOLD", 0.04),
         log_path=log_path,

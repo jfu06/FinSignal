@@ -6,6 +6,7 @@ anthropic==0.75.0           # Claude: answer generation + batch LLM-as-judge
 pydantic==2.13.4            # schemas + lenient validation of LLM tool outputs
 langgraph==1.2.11           # StateGraph orchestration of the QA pipeline
 langsmith==0.10.18          # optional tracing (enabled via LANGSMITH_TRACING)
+openai==3.8.0              # optional cross-vendor judge (JUDGE_PROVIDER=openai)
 streamlit==1.61.1           # demo UI (backend/ui/app.py)
 sentence-transformers==3.3.1  # local embeddings (no API key; design-doc §4 option)
 numpy==2.1.3               # vector handling for embeddings

@@ -10,10 +10,12 @@ application (``apply_verdicts``) is a pure function covered by unit tests.
 
 from __future__ import annotations
 
+import json
+
 import anthropic
 
-from .config import Settings, get_settings
-from .llm import anthropic_client
+from .config import ConfigError, Settings, get_settings
+from .llm import anthropic_client, openai_client
 from .logging_utils import log_event
 from .models import Chunk, Claim, Verdict
 from .schemas import VerdictsPayload
@@ -120,6 +122,73 @@ def apply_verdicts(claims: list[Claim], verdicts: list[dict]) -> list[Claim]:
     return claims
 
 
+def _judge_model(settings: Settings) -> str:
+    if settings.judge_model:
+        return settings.judge_model
+    return "gpt-5-mini" if settings.judge_provider == "openai" else settings.llm_model
+
+
+def _judge_anthropic(judge_prompt: str, settings: Settings) -> tuple[dict, str, int, int]:
+    """Anthropic judge call -> (raw_tool_input, stop_reason, in_tok, out_tok)."""
+
+    client = anthropic_client(settings)
+    response = client.messages.create(
+        model=_judge_model(settings),
+        max_tokens=4096,
+        system=_SYSTEM,
+        tools=[_JUDGE_TOOL],
+        tool_choice={"type": "tool", "name": "record_verdicts"},
+        messages=[{"role": "user", "content": judge_prompt}],
+    )
+    tool_use = next(b for b in response.content if b.type == "tool_use")
+    return (
+        tool_use.input,
+        response.stop_reason,
+        response.usage.input_tokens,
+        response.usage.output_tokens,
+    )
+
+
+def _judge_openai(judge_prompt: str, settings: Settings) -> tuple[dict, str, int, int]:
+    """OpenAI judge call (same tool schema via function calling)."""
+
+    if not settings.openai_api_key:
+        raise ConfigError(
+            "JUDGE_PROVIDER=openai requires OPENAI_API_KEY in backend/.env"
+        )
+    client = openai_client(settings)
+    response = client.chat.completions.create(
+        model=_judge_model(settings),
+        max_completion_tokens=4096,
+        messages=[
+            {"role": "system", "content": _SYSTEM},
+            {"role": "user", "content": judge_prompt},
+        ],
+        tools=[{
+            "type": "function",
+            "function": {
+                "name": _JUDGE_TOOL["name"],
+                "description": _JUDGE_TOOL["description"],
+                "parameters": _JUDGE_TOOL["input_schema"],
+            },
+        }],
+        tool_choice={"type": "function",
+                     "function": {"name": _JUDGE_TOOL["name"]}},
+    )
+    choice = response.choices[0]
+    call = (choice.message.tool_calls or [None])[0]
+    try:
+        raw = json.loads(call.function.arguments) if call else {}
+    except (json.JSONDecodeError, TypeError):
+        raw = {}
+    return (
+        raw,
+        choice.finish_reason,
+        response.usage.prompt_tokens,
+        response.usage.completion_tokens,
+    )
+
+
 def verify_claims_batch(
     claims: list[Claim],
     chunks_by_id: dict[str, Chunk],
@@ -131,35 +200,26 @@ def verify_claims_batch(
         return claims
 
     settings = settings or get_settings()
-    client = anthropic_client(settings)
 
     judge_prompt = (
         "Fact-check every claim below against its cited evidence. "
         "Return one verdict per claim.\n\n"
         + build_judge_input(claims, chunks_by_id)
     )
-    response = client.messages.create(
-        model=settings.llm_model,
-        max_tokens=4096,
-        system=_SYSTEM,
-        tools=[_JUDGE_TOOL],
-        tool_choice={"type": "tool", "name": "record_verdicts"},
-        messages=[{"role": "user", "content": judge_prompt}],
-    )
+    judge = _judge_openai if settings.judge_provider == "openai" else _judge_anthropic
+    raw, stop_reason, in_tok, out_tok = judge(judge_prompt, settings)
 
-    tool_use = next(b for b in response.content if b.type == "tool_use")
-    payload = VerdictsPayload.from_tool_input(tool_use.input)
+    payload = VerdictsPayload.from_tool_input(raw)
     apply_verdicts(claims, [v.model_dump() for v in payload.verdicts])
 
     query_id = claims[0].query_id
     # Full trace: judge prompt + raw verdicts, reproducible from the log alone.
     log_event(
         "llm_call", settings.log_path,
-        query_id=query_id, stage="judge", model=settings.llm_model,
-        stop_reason=response.stop_reason, prompt=judge_prompt,
-        output=tool_use.input,
-        input_tokens=response.usage.input_tokens,
-        output_tokens=response.usage.output_tokens,
+        query_id=query_id, stage="judge",
+        model=f"{settings.judge_provider}:{_judge_model(settings)}",
+        stop_reason=stop_reason, prompt=judge_prompt, output=raw,
+        input_tokens=in_tok, output_tokens=out_tok,
     )
     for claim in claims:
         log_event(
