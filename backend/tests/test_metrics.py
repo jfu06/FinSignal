@@ -111,3 +111,90 @@ class TestErrors:
         from tests.llm_fakes import make_settings
         with pytest.raises(MetricError, match="Unknown metric"):
             get_metric("AAPL", "vibes_per_share", settings=make_settings(__import__("pathlib").Path("/tmp")))
+
+
+class TestPublicApiWithFakeStore:
+    """Exercise the public API over an in-memory fact store (no DB/network)."""
+
+    STORE = {
+        # priority-1 revenue tag only has recent years…
+        ("us-gaap", "RevenueFromContractWithCustomerExcludingAssessedTax"): [
+            fact("2024-09-29", "2025-09-27", 416.2e9, accn="a25"),
+            fact("2023-10-01", "2024-09-28", 391.0e9, accn="a24"),
+            fact("2024-09-29", "2024-12-28", 124.3e9),
+            fact("2024-12-29", "2025-03-29", 95.4e9),
+            fact("2025-03-30", "2025-06-28", 94.0e9),
+        ],
+        # …older years live under the retired tag (§5.1 stitching)
+        ("us-gaap", "SalesRevenueNet"): [
+            fact("2017-10-01", "2018-09-29", 265.6e9, accn="a18"),
+        ],
+        ("us-gaap", "GrossProfit"): [
+            fact("2024-09-29", "2025-09-27", 195.2e9),
+        ],
+        ("us-gaap", "Assets"): [
+            fact(None, "2025-09-27", 344.1e9),
+            fact(None, "2025-06-28", 331.5e9),
+        ],
+    }
+
+    @pytest.fixture(autouse=True)
+    def _fake_store(self, monkeypatch):
+        import app.metrics as metrics
+
+        def fake_fetch(cik, taxonomy, tag, unit, settings):
+            return self.STORE.get((taxonomy, tag), [])
+
+        monkeypatch.setattr(metrics, "_fetch", fake_fetch)
+        monkeypatch.setattr(metrics, "_cik", lambda t: 320193)
+
+    def _s(self, tmp_path):
+        from tests.llm_fakes import make_settings
+        return make_settings(tmp_path)
+
+    def test_get_metric_latest_and_specific_fy(self, tmp_path):
+        from app.metrics import get_metric
+        assert get_metric("AAPL", "revenue", settings=self._s(tmp_path)).value == 416.2e9
+        assert get_metric("AAPL", "revenue", fy=2024,
+                          settings=self._s(tmp_path)).value == 391.0e9
+
+    def test_tag_fallback_reaches_retired_tag(self, tmp_path):
+        from app.metrics import get_metric
+        p = get_metric("AAPL", "revenue", fy=2018, settings=self._s(tmp_path))
+        assert p.value == 265.6e9 and p.accn == "a18"
+
+    def test_instant_metric_anchored_to_fy_end(self, tmp_path):
+        from app.metrics import get_metric
+        p = get_metric("AAPL", "total_assets", fy=2025,
+                       settings=self._s(tmp_path))
+        assert p.value == 344.1e9   # FY-end, not the Q3 balance sheet
+
+    def test_yoy_growth_math(self, tmp_path):
+        from app.metrics import yoy_growth
+        g, cur, prev = yoy_growth("AAPL", "revenue", settings=self._s(tmp_path))
+        assert g == pytest.approx((416.2 - 391.0) / 391.0)
+
+    def test_ratio_uses_same_fy(self, tmp_path):
+        from app.metrics import ratio
+        r, num, den = ratio("AAPL", "gross_margin", settings=self._s(tmp_path))
+        assert r == pytest.approx(195.2 / 416.2)
+        assert num.fy == den.fy == 2025
+
+    def test_q4_derivation(self, tmp_path):
+        from app.metrics import q4_single_quarter
+        p = q4_single_quarter("AAPL", "revenue", fy=2025,
+                              settings=self._s(tmp_path))
+        assert p.value == pytest.approx(416.2e9 - (124.3e9 + 95.4e9 + 94.0e9))
+        assert p.derived is True
+
+    def test_series_stitches_across_tags(self, tmp_path):
+        from app.metrics import get_series
+        pts = get_series("AAPL", "revenue", years=8, settings=self._s(tmp_path))
+        fys = [p.fy for p in pts]
+        assert 2025 in fys and 2024 in fys and 2018 in fys
+
+    def test_compare_sorts_descending(self, tmp_path):
+        from app.metrics import compare
+        pts = compare(["AAPL", "AAPL"], "revenue", settings=self._s(tmp_path))
+        assert [p.value for p in pts] == sorted(
+            (p.value for p in pts), reverse=True)
