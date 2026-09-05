@@ -188,7 +188,7 @@ def _fmt(value: float, unit: str) -> str:
 
 def _src(p) -> dict:  # noqa: ANN001
     return {"accn": p.accn, "form": p.form, "url": p.source_url,
-            "period_end": str(p.period_end)}
+            "period_end": str(p.period_end), "tag": p.tag}
 
 
 def _run_one(q: dict, default_ticker: str, settings: Settings,

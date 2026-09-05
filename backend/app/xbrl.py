@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from typing import Callable, Iterator
 
 from .config import Settings, get_settings
@@ -218,6 +219,44 @@ def dedupe_rows(rows: Iterator[tuple]) -> list[tuple]:
     return out
 
 
+def store_filing_docs(cik: int, settings: Settings, deep: bool = False,
+                      progress: Progress = _noop) -> int:
+    """Upsert accession -> primary-document mappings from EDGAR submissions.
+
+    Powers iXBRL-viewer provenance links (metrics.filing_url). ``deep``
+    pages beyond the ~1000-row "recent" window — needed for the decade-old
+    filings the FinanceBench benchmark pins.
+    """
+
+    progress("Fetching filing document map…")
+    subs = json.loads(_get(
+        f"https://data.sec.gov/submissions/CIK{cik:010d}.json"))
+    blocks = [subs["filings"]["recent"]]
+    if deep:
+        for extra in subs["filings"].get("files", []):
+            time.sleep(0.15)  # stay well under SEC's 10 req/s
+            blocks.append(json.loads(
+                _get(f"https://data.sec.gov/submissions/{extra['name']}")))
+    rows = [
+        (cik, acc, doc)
+        for b in blocks
+        for acc, doc in zip(b["accessionNumber"], b["primaryDocument"])
+        if doc
+    ]
+    with connect(settings) as conn, conn.cursor() as cur:
+        cur.executemany(
+            """
+            INSERT INTO filing_docs (cik, accn, primary_doc)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (cik, accn)
+            DO UPDATE SET primary_doc = EXCLUDED.primary_doc
+            """,
+            rows,
+        )
+        conn.commit()
+    return len(rows)
+
+
 def seed_metric_map(settings: Settings) -> None:
     """Upsert the METRICS registry into the metric_map table."""
 
@@ -273,6 +312,7 @@ def ingest_facts(
         )
         conn.commit()
     seed_metric_map(settings)
+    store_filing_docs(cik, settings, progress=progress)
 
     result = {"ticker": ticker, "cik": cik, "company": entry["title"],
               "facts": len(rows)}

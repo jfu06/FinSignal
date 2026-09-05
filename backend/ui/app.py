@@ -279,8 +279,12 @@ def render_report(report: dict, key: str) -> None:
             for s in r["sources"]
             if s["accn"] not in seen_accn and not seen_accn.add(s["accn"])
         )
+        # exact XBRL concepts: searchable in the SEC iXBRL viewer the link opens
+        tags = " · ".join(dict.fromkeys(
+            f"`{s['tag']}` ({s['period_end']})"
+            for s in r["sources"] if s.get("tag")))
         if links:
-            st.caption(f"Source: {links}")
+            st.caption(f"Source: {links}" + (f" — {tags}" if tags else ""))
 
     if report["summary"] and not (report.get("numeric")
                                   and not report["claims"]):

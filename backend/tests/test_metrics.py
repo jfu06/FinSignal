@@ -293,8 +293,14 @@ class TestDerivedMetrics(TestPublicApiWithFakeStore):
 
 
 class TestFilingUrl:
-    def test_links_to_human_readable_index_page(self):
+    def test_falls_back_to_human_readable_index_page(self):
         from app.metrics import filing_url
         url = filing_url(320193, "0000320193-25-000079")
         assert url == ("https://www.sec.gov/Archives/edgar/data/320193/"
                        "000032019325000079/0000320193-25-000079-index.htm")
+
+    def test_deep_links_ixbrl_viewer_when_primary_doc_known(self):
+        from app.metrics import filing_url
+        url = filing_url(320193, "0000320193-25-000079", "aapl-20250927.htm")
+        assert url == ("https://www.sec.gov/ix?doc=/Archives/edgar/data/"
+                       "320193/000032019325000079/aapl-20250927.htm")

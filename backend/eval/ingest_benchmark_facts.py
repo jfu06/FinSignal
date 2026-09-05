@@ -27,7 +27,13 @@ from app.config import get_settings
 from app.db import connect
 from app.edgar import _get
 from app.logging_utils import log_event
-from app.xbrl import dedupe_rows, parse_companyfacts, registry_tags, seed_metric_map
+from app.xbrl import (
+    dedupe_rows,
+    parse_companyfacts,
+    registry_tags,
+    seed_metric_map,
+    store_filing_docs,
+)
 
 from .benchmark_data import load_benchmark
 
@@ -75,7 +81,9 @@ def main(refresh: bool = False) -> int:
                     rows,
                 )
                 conn.commit()
-            print(f"  stored {len(rows):,} registry-tag facts")
+            n_docs = store_filing_docs(cik, settings, deep=True)
+            print(f"  stored {len(rows):,} registry-tag facts, "
+                  f"{n_docs:,} filing-doc mappings")
             log_event("xbrl_ingested", settings.log_path,
                       ticker=company, cik=cik, company=company,
                       facts=len(rows), filtered="registry")

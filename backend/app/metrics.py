@@ -64,6 +64,7 @@ class MetricPoint:
     source_url: str
     derived: bool = False          # True when computed (Q4, growth, margins)
     note: str = ""
+    tag: str = ""                  # exact XBRL concept, e.g. us-gaap:GrossProfit
 
     def as_dict(self) -> dict:
         return {
@@ -76,16 +77,39 @@ class MetricPoint:
         }
 
 
-def filing_url(cik: int, accn: str) -> str:
-    """Human-readable SEC filing index page (form type, date, document list).
+def filing_url(cik: int, accn: str, primary_doc: str | None = None) -> str:
+    """The most verifiable SEC link we can build for a filing.
 
-    NOT the bare archive directory — an analyst landing on a raw file
-    listing full of .xml can't verify anything; the index page links
-    straight to the 10-K document itself.
+    With the primary document known: the iXBRL viewer on the 10-K text
+    itself — every reported figure is a clickable tagged fact, so an
+    analyst can search the shown XBRL tag and land on the exact number.
+    Fallback: the human-readable filing index page (form type, date,
+    document list) — never the bare archive directory.
     """
 
+    if primary_doc:
+        return (f"https://www.sec.gov/ix?doc=/Archives/edgar/data/{cik}/"
+                f"{accn.replace('-', '')}/{primary_doc}")
     return (f"https://www.sec.gov/Archives/edgar/data/{cik}/"
             f"{accn.replace('-', '')}/{accn}-index.htm")
+
+
+_DOC_CACHE: dict[int, dict[str, str]] = {}
+
+
+def _primary_doc(cik: int, accn: str, settings: Settings) -> str | None:
+    docs = _DOC_CACHE.get(cik)
+    if docs is None:
+        try:
+            with connect(settings) as conn, conn.cursor() as cur:
+                cur.execute(
+                    "SELECT accn, primary_doc FROM filing_docs WHERE cik = %s",
+                    (cik,))
+                docs = dict(cur.fetchall())
+        except Exception:  # noqa: BLE001 — provenance must never break answers
+            docs = {}
+        _DOC_CACHE[cik] = docs
+    return docs.get(accn)
 
 
 # ----------------------------- pure selection -----------------------------
@@ -239,7 +263,9 @@ def get_metric(ticker: str, metric: str, fy: int | None = None,
                 value=point.val, unit=spec["unit"],
                 period_start=point.start, period_end=point.end,
                 accn=point.accn, form=point.form,
-                source_url=filing_url(cik, point.accn),
+                source_url=filing_url(
+                    cik, point.accn, _primary_doc(cik, point.accn, settings)),
+                tag=f"{taxonomy}:{tag}",
             )
     return None
 
@@ -359,7 +385,7 @@ def q4_single_quarter(ticker: str, metric: str, fy: int | None = None,
                 value=q4, unit=annual.unit,
                 period_start=qs[-1].end, period_end=annual.period_end,
                 accn=annual.accn, form=annual.form,
-                source_url=annual.source_url, derived=True,
+                source_url=annual.source_url, derived=True, tag=annual.tag,
                 note="Q4 = FY − Q1 − Q2 − Q3 (computed; Q4 is not reported)",
             )
     return None

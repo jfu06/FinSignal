@@ -109,3 +109,14 @@ CREATE TABLE IF NOT EXISTS metric_map (
     priority INT  NOT NULL,        -- 1 = preferred
     PRIMARY KEY (metric, taxonomy, tag)
 );
+
+-- Filing primary documents: accession -> the filing's main HTML document,
+-- so numeric provenance can deep-link the SEC iXBRL viewer (the actual
+-- 10-K text with every fact clickable) instead of the bare filing index.
+-- Populated from the EDGAR submissions API at fact-ingestion time.
+CREATE TABLE IF NOT EXISTS filing_docs (
+    cik         BIGINT NOT NULL,
+    accn        TEXT   NOT NULL,
+    primary_doc TEXT   NOT NULL,
+    PRIMARY KEY (cik, accn)
+);
