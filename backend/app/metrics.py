@@ -77,8 +77,15 @@ class MetricPoint:
 
 
 def filing_url(cik: int, accn: str) -> str:
+    """Human-readable SEC filing index page (form type, date, document list).
+
+    NOT the bare archive directory — an analyst landing on a raw file
+    listing full of .xml can't verify anything; the index page links
+    straight to the 10-K document itself.
+    """
+
     return (f"https://www.sec.gov/Archives/edgar/data/{cik}/"
-            f"{accn.replace('-', '')}")
+            f"{accn.replace('-', '')}/{accn}-index.htm")
 
 
 # ----------------------------- pure selection -----------------------------

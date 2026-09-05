@@ -290,3 +290,11 @@ class TestDerivedMetrics(TestPublicApiWithFakeStore):
         get_metric("AAPL", "revenue", settings=self._s(tmp_path),
                    cik=320193, accn="a25")
         assert all(c["accn"] == "a25" for c in self.fetch_calls)
+
+
+class TestFilingUrl:
+    def test_links_to_human_readable_index_page(self):
+        from app.metrics import filing_url
+        url = filing_url(320193, "0000320193-25-000079")
+        assert url == ("https://www.sec.gov/Archives/edgar/data/320193/"
+                       "000032019325000079/0000320193-25-000079-index.htm")

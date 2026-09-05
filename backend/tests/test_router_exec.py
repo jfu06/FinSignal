@@ -153,6 +153,23 @@ class TestExecuteNumeric:
         assert "3-year average" in out[0]["text"]
         assert "45.4%" in out[0]["text"]  # mean(46.9, 45.1, 44.3)
 
+    def test_series_over_ratio_lists_per_year_trend(
+            self, fake_metrics, monkeypatch, tmp_path):
+        vals = {2025: 0.469, 2024: 0.451, 2023: 0.443}
+
+        def fake_ratio(t, name, fy=None, settings=None, **kw):
+            y = fy or 2025
+            if y not in vals:
+                return None
+            return (vals[y], point("gross_profit", 195.2e9, fy=y),
+                    point(fy=y))
+
+        monkeypatch.setattr(router, "ratio", fake_ratio)
+        out = execute_numeric(
+            [{"op": "series", "metric": "gross_margin", "years": 3}],
+            "AAPL", make_settings(tmp_path))
+        assert "FY2023 44.3%; FY2024 45.1%; FY2025 46.9%" in out[0]["text"]
+
     def test_query_cap(self, fake_metrics, tmp_path):
         out = execute_numeric(
             [{"op": "value", "metric": "revenue"}] * 10,

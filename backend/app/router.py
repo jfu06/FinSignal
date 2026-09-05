@@ -100,7 +100,9 @@ Ops: value (one figure; fy optional), yoy (year-over-year change),
 cagr (needs years), average (mean over years — works for ratios too, e.g.
 3-year average net margin: op=average, metric=net_margin, years=3, fy=the
 LAST year of the window), q4 (derived Q4 single quarter), series (multi-year
-trend; years optional), compare (across the given tickers), ratio.
+trend — works for ratios too: "trend in gross margin" -> op=series,
+metric=gross_margin; years optional), compare (across the given tickers),
+ratio.
 
 When the question compares companies ("A vs B", "who spends more"), you MUST
 use op="compare" with tickers listing EVERY company mentioned.\
@@ -220,7 +222,7 @@ def _run_one(q: dict, default_ticker: str, settings: Settings,
                         f"{_fmt(value, spec['unit'])} "
                         f"(= {spec['note']}; {parts})"}
 
-    if (metric in RATIOS or op == "ratio") and op != "average":
+    if (metric in RATIOS or op == "ratio") and op not in ("average", "series"):
         out = ratio(t, metric, fy=fy, settings=settings, cik=cik, accn=accn)
         if not out:
             return {"ok": False}
@@ -299,6 +301,26 @@ def _run_one(q: dict, default_ticker: str, settings: Settings,
 
     if op == "series":
         years = q.get("years") or 5
+        if metric in RATIOS:
+            # trend of a ratio = the per-year ratio series (e.g. "3-year
+            # trend in gross margin"), not a single latest value
+            first = ratio(t, metric, fy=fy, settings=settings,
+                          cik=cik, accn=accn)
+            if not first:
+                return {"ok": False}
+            per_year, sources = [], []
+            base_fy = first[2].fy
+            for y in range(base_fy, base_fy - years, -1):
+                out = ratio(t, metric, fy=y, settings=settings,
+                            cik=cik, accn=accn)
+                if out:
+                    per_year.append((y, out[0]))
+                    sources += [_src(out[1]), _src(out[2])]
+            if not per_year:
+                return {"ok": False}
+            trend = "; ".join(f"FY{y} {r:.1%}" for y, r in reversed(per_year))
+            return {"ok": True, "sources": sources,
+                    "text": f"{t} {metric.replace('_', ' ')} trend: {trend}"}
         pts = get_series(t, metric, years=years, settings=settings,
                          cik=cik, accn=accn)
         if not pts:

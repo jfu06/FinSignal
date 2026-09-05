@@ -273,8 +273,11 @@ def render_report(report: dict, key: str) -> None:
             f'<span>{html_lib.escape(r["text"])}</span></div>',
             unsafe_allow_html=True,
         )
+        seen_accn: set[str] = set()
         links = " · ".join(
-            f"[{s['form']} {s['accn']}]({s['url']})" for s in r["sources"][:3]
+            f"[{s['form']} {s['accn']}]({s['url']})"
+            for s in r["sources"]
+            if s["accn"] not in seen_accn and not seen_accn.add(s["accn"])
         )
         if links:
             st.caption(f"Source: {links}")
@@ -314,14 +317,17 @@ def render_report(report: dict, key: str) -> None:
             st.markdown(f"- 🚩 {r}")
 
     retr = report.get("retrieval", {})
-    with st.expander("🔍 Retrieval trace (agentic refinement loop)"):
-        st.markdown(
-            f"- Rounds: **{retr.get('rounds', 1)}** · decisions: "
-            f"**{' → '.join(retr.get('decisions', [])) or 'ENOUGH'}**\n"
-            f"- Final query: `{retr.get('final_query', '')[:120]}` · "
-            f"top-k: **{retr.get('final_k', '-')}**\n"
-            f"- Chunks: {', '.join(report.get('retrieved_chunk_ids', []))}"
-        )
+    if not report.get("retrieved_chunk_ids"):
+        retr = None  # pure-numeric answer: no retrieval happened
+    if retr is not None:
+        with st.expander("🔍 Retrieval trace (agentic refinement loop)"):
+            st.markdown(
+                f"- Rounds: **{retr.get('rounds', 1)}** · decisions: "
+                f"**{' → '.join(retr.get('decisions', [])) or 'ENOUGH'}**\n"
+                f"- Final query: `{retr.get('final_query', '')[:120]}` · "
+                f"top-k: **{retr.get('final_k', '-')}**\n"
+                f"- Chunks: {', '.join(report.get('retrieved_chunk_ids', []))}"
+            )
     st.download_button(
         "⬇️ Export report (JSON)",
         data=json.dumps(report, ensure_ascii=False, indent=2),
@@ -363,9 +369,17 @@ def render_digest(digest: dict, key: str) -> None:
         f"is independently verified."
     )
     for r in digest.get("figures", []):
-        st.info(f"🔢 {r['text']}")
+        st.markdown(
+            f'<div class="fs-num"><span>🔢</span>'
+            f'<span>{html_lib.escape(r["text"])}</span></div>',
+            unsafe_allow_html=True,
+        )
+        seen_accn: set[str] = set()
         links = " · ".join(
-            f"[{s['form']} {s['accn']}]({s['url']})" for s in r["sources"][:2])
+            f"[{s['form']} {s['accn']}]({s['url']})"
+            for s in r["sources"]
+            if s["accn"] not in seen_accn and not seen_accn.add(s["accn"])
+        )
         if links:
             st.caption(links)
     for sec in digest.get("sections", []):
