@@ -251,7 +251,12 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
     st.write("")
-    ticker = st.selectbox("1️⃣ Pick a company", tickers(),
+    # ?ticker=NVDA preselects the company (the Chrome extension's
+    # right-click flow lands here) — falls back silently when unknown
+    _opts = tickers()
+    _wanted = (st.query_params.get("ticker") or "").strip().upper()
+    _idx = _opts.index(_wanted) if _wanted in _opts else 0
+    ticker = st.selectbox("1️⃣ Pick a company", _opts, index=_idx,
                           help="Every question below is answered for this "
                                "company unless you name another one.")
 
