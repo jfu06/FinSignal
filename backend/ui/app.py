@@ -95,6 +95,41 @@ span[translate="no"] {
 .fs-cat.hyb { color: #4A5490; }
 .fs-step { color: #5D6771; font-size: 0.9rem; margin-bottom: 10px; }
 .fs-step b { color: #1F262B; }
+
+/* ---- annual report digest ---- */
+.fs-dg-head {
+  background: linear-gradient(135deg, #0E7A6E 0%, #0A5A52 100%);
+  color: #FFFFFF; border-radius: 12px; padding: 18px 22px; margin: 4px 0 14px;
+}
+.fs-dg-head .t { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.01em; }
+.fs-dg-head .s { font-size: 0.82rem; opacity: 0.85; margin-top: 3px; }
+.fs-dg-chip {
+  display: inline-block; font-size: 0.74rem; font-weight: 600;
+  background: rgba(255,255,255,0.16); border-radius: 99px;
+  padding: 2px 10px; margin: 8px 6px 0 0;
+}
+.fs-kpis { display: flex; flex-wrap: wrap; gap: 10px; margin: 2px 0 6px; }
+.fs-kpi {
+  flex: 1 1 150px; min-width: 150px; background: #FFFFFF;
+  border: 1px solid #E3E7E3; border-radius: 10px; padding: 12px 14px;
+  box-shadow: 0 1px 2px rgba(20,40,35,0.05);
+}
+.fs-kpi .l { color: #75808A; font-size: 0.72rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em; }
+.fs-kpi .v { font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 1.35rem; font-weight: 500; color: #1F262B; margin: 2px 0; }
+.fs-kpi .d { display: inline-block; font-size: 0.74rem; font-weight: 700;
+  border-radius: 99px; padding: 1px 8px; }
+.fs-kpi .d.up { background: #E4F1EA; color: #1E6B43; }
+.fs-kpi .d.down { background: #F7E8E6; color: #A0392E; }
+.fs-kpi .src { margin-top: 6px; font-size: 0.7rem; }
+.fs-kpi .src a { color: #75808A; text-decoration: none; }
+.fs-dg-sec {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 1.05rem; font-weight: 700; color: inherit;
+  border-bottom: 2px solid rgba(14,122,110,0.35);
+  padding-bottom: 6px; margin: 22px 0 8px;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -524,37 +559,86 @@ def _format_table_rows(text: str) -> str:
     return "\n".join(out)
 
 
+_KPI_RE = __import__("re").compile(
+    r"^\w+ (?P<label>.+?) FY(?P<fy>\d{4}): (?P<value>[^,(]+?)"
+    r"(?: \(= .*\))?"
+    r"(?:, (?P<delta>[+\-][\d.]+%) YoY.*)?$"
+)
+
+_SECTION_ICONS = {"What the company does": "🏢",
+                  "How the last fiscal year went": "📈",
+                  "Key risks": "⚠️",
+                  "What management emphasizes": "🎯"}
+
+
+def _kpi_tile(r: dict) -> str | None:
+    """One stat tile from a deterministic figure-card template (None = the
+    text doesn't match our own template; caller falls back to a plain card)."""
+
+    m = _KPI_RE.match(r["text"])
+    if not m:
+        return None
+    label = html_lib.escape(m.group("label"))
+    value = html_lib.escape(m.group("value").strip())
+    delta = m.group("delta")
+    delta_html = ""
+    if delta:
+        cls = "up" if delta.startswith("+") else "down"
+        delta_html = f'<span class="d {cls}">{delta} YoY</span>'
+    src = next(iter(r.get("sources", [])), None)
+    src_html = ""
+    if src:
+        src_html = (f'<div class="src"><a href="{src["url"]}" '
+                    f'target="_blank">{src["form"]} · FY{m.group("fy")}</a></div>')
+    return (f'<div class="fs-kpi"><div class="l">{label}</div>'
+            f'<div class="v">{value}</div>{delta_html}{src_html}</div>')
+
+
 def render_digest(digest: dict, key: str) -> None:
-    st.markdown(f"### 📊 {digest['ticker']} — Annual report digest")
     # Scorecard from actual stats — a static "every claim verified" header
     # over a 4-of-6 answer endorses what didn't happen (review round 13).
     _claims = [c for sec in digest.get("sections", [])
                for c in (sec.get("report") or {}).get("claims", [])]
     _n_ok = sum(1 for c in _claims if not c.get("unverified"))
-    verified_bit = ("every narrative claim independently verified"
-                    if _claims and _n_ok == len(_claims)
-                    else f"{_n_ok} of {len(_claims)} narrative claims "
-                         f"verified")
-    st.caption(
-        f"Generated in {digest.get('latency_s', 0):.0f}s. Figures computed "
-        f"from official filing data; {verified_bit}."
+    verified_chip = ("✅ every narrative claim verified"
+                     if _claims and _n_ok == len(_claims)
+                     else f"✅ {_n_ok} of {len(_claims)} claims verified")
+    fy = ""
+    m = _KPI_RE.match(digest["figures"][0]["text"]) if digest.get("figures") else None
+    if m:
+        fy = f" · FY{m.group('fy')}"
+    st.markdown(
+        f'<div class="fs-dg-head">'
+        f'<div class="t">📊 {digest["ticker"]} · Annual Report Digest</div>'
+        f'<div class="s">Latest 10-K{fy} — figures computed from official '
+        f'XBRL data, narrative verified against the filing</div>'
+        f'<span class="fs-dg-chip">⏱ {digest.get("latency_s", 0):.0f}s</span>'
+        f'<span class="fs-dg-chip">{verified_chip}</span>'
+        f'</div>',
+        unsafe_allow_html=True,
     )
+    tiles, plain = [], []
     for r in digest.get("figures", []):
+        tile = _kpi_tile(r)
+        # plain statements only: Streamlit "magic" renders bare expression
+        # values, so a ternary here printed five literal "None"s
+        if tile:
+            tiles.append(tile)
+        else:
+            plain.append(r)
+    if tiles:
+        st.markdown(f'<div class="fs-kpis">{"".join(tiles)}</div>',
+                    unsafe_allow_html=True)
+    for r in plain:  # anything our template parser didn't recognize
         st.markdown(
             f'<div class="fs-num"><span>🔢</span>'
             f'<span>{html_lib.escape(r["text"])}</span></div>',
             unsafe_allow_html=True,
         )
-        seen_accn: set[str] = set()
-        links = " · ".join(
-            f"[{s['form']} {s['accn']}]({s['url']})"
-            for s in r["sources"]
-            if s["accn"] not in seen_accn and not seen_accn.add(s["accn"])
-        )
-        if links:
-            st.caption(links)
     for sec in digest.get("sections", []):
-        st.markdown(f"#### {sec['title']}")
+        icon = _SECTION_ICONS.get(sec["title"], "📄")
+        st.markdown(f'<div class="fs-dg-sec">{icon} {sec["title"]}</div>',
+                    unsafe_allow_html=True)
         if "error" in sec:
             st.error(f"This section failed to generate: {sec['error'][:120]}")
             continue
