@@ -305,6 +305,12 @@ def render_report(report: dict, key: str) -> None:
     # came from (computed vs read) — the product's core differentiation.
     has_numeric = bool(report.get("numeric"))
     has_claims = bool(report.get("claims"))
+    if report.get("out_of_scope"):
+        st.markdown('<span class="fs-badge fs-badge-doc">💬 Not a filings '
+                    'question</span>', unsafe_allow_html=True)
+        st.markdown(report["summary"].replace("$", "\\$"))
+        st.caption(report["disclaimer"])
+        return
     badges = ""
     if has_numeric:
         badges += ('<span class="fs-badge fs-badge-num">🔢 Computed · '
@@ -375,8 +381,9 @@ def render_report(report: dict, key: str) -> None:
     ok_claims = [c for c in report["claims"] if not c["unverified"]]
     warn_claims = [c for c in report["claims"] if c["unverified"]]
     if report["claims"]:
+        n = len(report["claims"])
         st.caption(
-            f"{len(report['claims'])} claims · {len(ok_claims)} verified · "
+            f"{n} claim{'s' if n != 1 else ''} · {len(ok_claims)} verified · "
             f"{len(warn_claims)} unverified"
             + (f" ({report['unsupported_rate']:.0%})" if warn_claims else "")
             + f" · {report.get('latency_s', 0):.0f}s"
@@ -438,7 +445,10 @@ def render_claim(c: dict) -> None:
     if sig.get("echoes"):
         meta += f" · 🔁 echoed in {', '.join(sig['echoes'])}"
     span = c.get("span_overlap") or {}
-    if span.get("xbrl_match"):
+    if span.get("arithmetic_ok") is False:
+        meta += (" · 🔢⚠️ figures in this sentence don't add up — "
+                 "review advised")
+    elif span.get("xbrl_match"):
         meta += " · 🔢 figures match official XBRL data"
     elif span.get("flagged"):
         meta += (" · 🔢⚠️ figures not found in cited text or official "
@@ -516,10 +526,18 @@ def _format_table_rows(text: str) -> str:
 
 def render_digest(digest: dict, key: str) -> None:
     st.markdown(f"### 📊 {digest['ticker']} — Annual report digest")
+    # Scorecard from actual stats — a static "every claim verified" header
+    # over a 4-of-6 answer endorses what didn't happen (review round 13).
+    _claims = [c for sec in digest.get("sections", [])
+               for c in (sec.get("report") or {}).get("claims", [])]
+    _n_ok = sum(1 for c in _claims if not c.get("unverified"))
+    verified_bit = ("every narrative claim independently verified"
+                    if _claims and _n_ok == len(_claims)
+                    else f"{_n_ok} of {len(_claims)} narrative claims "
+                         f"verified")
     st.caption(
-        f"Generated in {digest.get('latency_s', 0):.0f}s. Figures are "
-        f"official filing data (deterministic); every narrative claim below "
-        f"is independently verified."
+        f"Generated in {digest.get('latency_s', 0):.0f}s. Figures computed "
+        f"from official filing data; {verified_bit}."
     )
     for r in digest.get("figures", []):
         st.markdown(
@@ -626,7 +644,8 @@ for i, turn in enumerate(history):
         st.markdown(f"**[{turn['ticker']}]** {turn['question']}")
         if turn.get("standalone") and turn["standalone"] != turn["question"]:
             st.caption(f"Interpreted as: {turn['standalone']}")
-        elif not turn.get("digest"):
+        elif (not turn.get("digest")
+                and not (turn.get("report") or {}).get("out_of_scope")):
             # which document answered is always worth a line — "last year"
             # near a fiscal-year boundary is genuinely ambiguous, and even
             # timeless questions are scoped to one filing
@@ -634,6 +653,9 @@ for i, turn in enumerate(history):
     with st.chat_message("assistant"):
         if turn.get("error"):
             st.error(turn["error"])
+            if turn.get("error_detail"):
+                with st.expander("Technical detail"):
+                    st.caption(turn["error_detail"])
         elif turn.get("digest"):
             render_digest(turn["digest"], key=f"digest_{i}")
         else:
@@ -773,6 +795,10 @@ if prompt and prompt.strip():
             except PipelineError as exc:
                 turn["error"] = f"Invalid input: {exc}"
             except Exception as exc:  # noqa: BLE001
-                turn["error"] = f"Analysis failed, please retry. ({exc})"
+                # human-readable message; internals go to the detail line,
+                # not the headline (review round 12: stop_reason dumps
+                # read as an unfinished product)
+                turn["error"] = "Analysis failed — please retry."
+                turn["error_detail"] = str(exc)[:300]
         history.append(turn)
         st.rerun()

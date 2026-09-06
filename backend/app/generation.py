@@ -83,12 +83,21 @@ fastest-growing line is often NOT the largest contributor — say so when \
 true. Cover every dimension the evidence breaks down (product lines AND \
 regions). Stay on the asked metric — operating expenses are not a revenue \
 driver.
+- JUDGMENT questions ("is the debt sustainable?", "is this good?") ask \
+for a verdict no filing states. Open the summary by saying so, then give \
+the RELATED FACTS the filing does report (levels, maturities, hedges, \
+ratings) as claims, and close with what a real verdict would need beyond \
+the filing. Facts with a stated boundary — never a bare verdict, never an \
+empty answer.
 - When the real answer is that a concept does NOT APPLY to this company \
 (a broker reports no COGS, so "gross margin" is undefined), LEAD the \
 summary with that substantive reason — only then note what the excerpts \
 contain — and END by pointing at the closest metric the filing DOES \
 report, phrased as a ready question ('Try: "What is the 3-year trend in \
-net revenues?"'). Never frame a not-applicable concept as a retrieval gap.
+net revenues?"'). Never frame a not-applicable concept as a retrieval gap. \
+A refusal is not a claim: put the ENTIRE explanation in the summary and \
+return an EMPTY claims list — a good refusal must not show up as \
+"unverified".
 - Skip BOILERPLATE: a claim that would hold with the company's name \
 swapped for any other ("success depends on innovation", "markets are \
 competitive") earns its place only if the question asks for it. Prefer \
@@ -202,9 +211,20 @@ def generate_answer(
             raw_sample=str(raw_candidate)[:500],  # for diagnosing new shapes
         )
     else:
-        raise RuntimeError(
-            f"Answer generation returned invalid structured output twice "
-            f"({last_problem}); aborting this query safely."
+        # Fail closed, never fail silent (review round 12): two malformed
+        # attempts used to surface a raw internal error. The honest floor
+        # is a templated scope note — no invented content, zero claims —
+        # so the user gets guidance instead of a stack trace.
+        log_event("generation_gave_up", settings.log_path,
+                  query_id=query_id, problem=last_problem)
+        return (
+            "I could not produce a verifiable structured answer for this "
+            "question. That usually means it asks for a judgment or "
+            "forward-looking view (sustainability, outlook, comparisons "
+            "beyond this filing) that a 10-K does not state. Try asking "
+            "for the underlying reported facts instead — e.g. the debt "
+            "level, its maturity profile, or interest coverage.",
+            [],
         )
 
     # Full trace: prompt + raw structured output, keyed by query_id, so a bad

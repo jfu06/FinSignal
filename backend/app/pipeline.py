@@ -98,7 +98,8 @@ class PipelineState(TypedDict, total=False):
     query_id: str
     doc_id: str                    # benchmark/oracle-document mode: pin retrieval
     numeric_scope: dict            # oracle-doc numeric: {"cik", "accn"}
-    route: str                     # narrative | numeric | hybrid
+    route: str                     # narrative | numeric | hybrid | out_of_scope
+    refusal: str                   # out_of_scope reply, asker's language
     coverage: bool                 # enumeration ask -> diversified retrieval
     route_degraded: bool           # numeric route fell back to narrative
     numeric_future: Any            # hybrid: metric queries running in parallel
@@ -218,7 +219,10 @@ def build_graph(settings: Settings):
                 state["question"], state["ticker"],
                 settings=settings, query_id=state["query_id"],
             )
-            return {"route": decision["route"],
+            route = decision["route"]
+            if route == "out_of_scope":
+                route = "narrative"  # benchmark questions are always in scope
+            return {"route": route,
                     "numeric_queries": decision["queries"],
                     "needs_onboarding": ""}
         # Phase-2 router: numeric -> metrics layer, narrative -> RAG,
@@ -253,6 +257,7 @@ def build_graph(settings: Settings):
         )
         return {"route": decision["route"],
                 "numeric_queries": decision["queries"],
+                "refusal": decision.get("refusal", ""),
                 "ticker": resolved,
                 "needs_onboarding": needs}
 
@@ -289,6 +294,23 @@ def build_graph(settings: Settings):
             update["route"] = "narrative"
             update["route_degraded"] = True
         return update
+
+    def assemble_out_of_scope(state: PipelineState) -> PipelineState:
+        # Blocked at the router (one cheap call) — no retrieval, no
+        # generation, no verification spend on weather questions.
+        report: dict[str, Any] = {
+            "query_id": state["query_id"],
+            "ticker": state["ticker"],
+            "question": state["question"],
+            "summary": state["refusal"],
+            "claims": [], "risk_flags": [], "unsupported_claims": [],
+            "blocked_claims": [], "unsupported_rate": 0.0,
+            "out_of_scope": True,
+            "disclaimer": DISCLAIMER,
+        }
+        log_event("out_of_scope", settings.log_path,
+                  query_id=state["query_id"])
+        return {"report": report}
 
     def assemble_numeric(state: PipelineState) -> PipelineState:
         # Pure-numeric answer: deterministic renderings, no LLM, no claims.
@@ -418,6 +440,8 @@ def build_graph(settings: Settings):
     def route_after_router(state: PipelineState) -> str:
         if state.get("needs_onboarding"):
             return "onboard"
+        if state["route"] == "out_of_scope":
+            return "out_of_scope"
         return "narrative" if state["route"] == "narrative" else "numeric"
 
     def route_after_numeric(state: PipelineState) -> str:
@@ -437,6 +461,7 @@ def build_graph(settings: Settings):
     graph.add_node("onboarding_required", onboarding_required)
     graph.add_node("run_numeric", numeric_node)
     graph.add_node("assemble_numeric", assemble_numeric)
+    graph.add_node("assemble_out_of_scope", assemble_out_of_scope)
     graph.add_node("retrieve", retrieve)
     graph.add_node("generate", generate)
     graph.add_node("verify", verify)
@@ -447,7 +472,8 @@ def build_graph(settings: Settings):
     graph.add_conditional_edges(
         "route_question", route_after_router,
         {"narrative": "retrieve", "numeric": "run_numeric",
-         "onboard": "onboarding_required"},
+         "onboard": "onboarding_required",
+         "out_of_scope": "assemble_out_of_scope"},
     )
     graph.add_edge("onboarding_required", END)
     graph.add_conditional_edges(
@@ -455,6 +481,7 @@ def build_graph(settings: Settings):
         {"assemble_numeric": "assemble_numeric", "narrative": "retrieve"},
     )
     graph.add_edge("assemble_numeric", END)
+    graph.add_edge("assemble_out_of_scope", END)
     graph.add_edge("retrieve", "generate")
     graph.add_edge("generate", "verify")
     graph.add_conditional_edges(

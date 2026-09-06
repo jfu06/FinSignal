@@ -42,10 +42,10 @@ def _noop(_: str) -> None:  # pragma: no cover - trivial
 # Deterministic key figures — hand-built queries, router not involved.
 FIGURE_QUERIES: list[dict] = [
     {"op": "yoy", "metric": "revenue"},
-    {"op": "value", "metric": "net_income"},
-    {"op": "ratio", "metric": "gross_margin"},
-    {"op": "value", "metric": "research_and_development"},
-    {"op": "value", "metric": "operating_cash_flow"},
+    {"op": "yoy", "metric": "net_income"},
+    {"op": "ratio", "metric": "net_margin"},
+    {"op": "yoy", "metric": "research_and_development"},
+    {"op": "yoy", "metric": "operating_cash_flow"},
 ]
 
 # (key, title, question) — questions are phrased to land in different parts

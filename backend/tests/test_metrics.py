@@ -153,7 +153,7 @@ class TestPublicApiWithFakeStore:
 
         self.fetch_calls = []
 
-        def fake_fetch(cik, taxonomy, tag, unit, settings, accn=None):
+        def fake_fetch(cik, taxonomy, tag, unit, settings, accn=None, forms=None):
             self.fetch_calls.append({"cik": cik, "accn": accn})
             return self.STORE.get((taxonomy, tag), [])
 

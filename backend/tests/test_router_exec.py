@@ -184,7 +184,7 @@ class TestExecuteNumeric:
 class TestRouteQuestion:
     def test_valid_numeric_route(self, tmp_path):
         FakeAnthropic.queue = [tool_response({
-            "route": "numeric", "reason": "figure",
+            "route": "numeric", "reason": "figure", "fully_answers": True,
             "queries": [{"op": "value", "metric": "revenue"}]})]
         r = route_question("revenue?", "AAPL", make_settings(tmp_path))
         assert r["route"] == "numeric"
@@ -193,7 +193,8 @@ class TestRouteQuestion:
     def test_llm_failure_fails_open_to_narrative(self, tmp_path):
         FakeAnthropic.queue = []  # client will blow up
         r = route_question("q?", "AAPL", make_settings(tmp_path))
-        assert r == {"route": "narrative", "queries": [], "companies": []}
+        assert r == {"route": "narrative", "queries": [], "companies": [],
+                     "refusal": ""}
 
     def test_numeric_with_no_queries_collapses_to_narrative(self, tmp_path):
         FakeAnthropic.queue = [tool_response({
@@ -236,3 +237,80 @@ class TestSeriesSynthesis:
                point(fy=2025, value=95.0e9)]
         text = router._series_text("T", "revenue", pts)
         assert "declined in FY2024" in text
+
+
+class TestSynthesisGuards:
+    """Review round 8: derived stats must not fire indiscriminately."""
+
+    def test_halt_and_restart_no_cagr_no_declined(self):
+        # SCHW buybacks: $2.84B -> $0 (reported zero) -> $7.35B.
+        # A +60.8% CAGR across a halt is arithmetic truth, narrative lie.
+        pts = [point(fy=2023, value=2.842e9), point(fy=2024, value=0.0),
+               point(fy=2025, value=7.346e9)]
+        text = router._series_text("SCHW", "share_buybacks", pts)
+        assert "(halted)" in text and "(resumed)" in text
+        assert "CAGR" not in text
+        assert "declined" not in text
+        assert "-100" not in text
+
+    def test_missing_year_called_out(self):
+        pts = [point(fy=2022, value=10.0e9), point(fy=2025, value=12.0e9)]
+        text = router._series_text("T", "revenue", pts)
+        assert "FY2023, FY2024 not in the official data" in text
+
+    def test_financial_revenue_tag_gets_filing_label(self):
+        assert router._metric_label(
+            "revenue", "us-gaap:Revenues") == "total net revenues"
+        assert router._metric_label(
+            "revenue",
+            "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax"
+        ) == "revenue"
+
+
+class TestAsOfAnchor:
+    def test_stale_tag_results_dropped(self):
+        # round 9 P0-2: FY2021 long-term debt must not sit beside FY2025
+        # figures in one answer
+        results = [
+            {"ok": True, "query": {"op": "value", "metric": "revenue"},
+             "sources": [{"accn": "a1", "tag": "t", "period_end": "2025-12-31"}],
+             "text": "current"},
+            {"ok": True, "query": {"op": "value", "metric": "long_term_debt"},
+             "sources": [{"accn": "a0", "tag": "t", "period_end": "2021-12-31"}],
+             "text": "stale"},
+            {"ok": True,
+             "query": {"op": "value", "metric": "revenue", "fy": 2021},
+             "sources": [{"accn": "a0", "tag": "t", "period_end": "2021-12-31"}],
+             "text": "explicit-year"},
+        ]
+        kept = router._drop_stale(results, anchor_fy=2025)
+        assert [r["text"] for r in kept] == ["current", "explicit-year"]
+
+
+class TestOutOfScopeRoute:
+    def test_out_of_scope_with_refusal_passes_through(self, tmp_path):
+        FakeAnthropic.queue = [tool_response({
+            "route": "out_of_scope",
+            "refusal": "这个系统回答 SEC 财报问题。试试：施瓦布的净利率趋势？",
+            "reason": "weather",
+        })]
+        r = route_question("今天天气怎么样", "SCHW", make_settings(tmp_path))
+        assert r["route"] == "out_of_scope"
+        assert "SEC" in r["refusal"]
+
+    def test_out_of_scope_without_refusal_fails_open(self, tmp_path):
+        FakeAnthropic.queue = [tool_response({
+            "route": "out_of_scope", "reason": "weather"})]
+        r = route_question("weather?", "SCHW", make_settings(tmp_path))
+        assert r["route"] == "narrative"
+
+
+class TestFullyAnswersContract:
+    def test_numeric_without_full_answer_demoted_to_hybrid(self, tmp_path):
+        # round 11: revenue emitted for a pre-tax-margin question shipped a
+        # bare denominator as the whole answer — silent metric substitution
+        FakeAnthropic.queue = [tool_response({
+            "route": "numeric", "reason": "partial", "fully_answers": False,
+            "queries": [{"op": "value", "metric": "revenue"}]})]
+        r = route_question("pre-tax margin?", "SCHW", make_settings(tmp_path))
+        assert r["route"] == "hybrid"  # text line must answer the question

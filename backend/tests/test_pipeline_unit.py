@@ -93,6 +93,20 @@ class TestGenerateAnswer:
             "q1", "question", [make_chunk()], settings=make_settings(tmp_path))
         assert len(claims) == 1 and claims[0].kind == "risk"
 
+    def test_json_serialized_claim_string_recovers_citations(self, tmp_path):
+        # Observed live (TSLA eval case): the model emitted the claim OBJECT
+        # as a JSON string — citations drowned inside it, judge saw nothing
+        import json as _json
+        item = _json.dumps({"text": "特斯拉使用视觉技术训练神经网络。",
+                            "cited_chunk_ids": ["c1"], "kind": "insight"},
+                           ensure_ascii=False)
+        FakeAnthropic.queue = [tool_response({"summary": "s",
+                                              "claims": [item]})]
+        _, claims = generation.generate_answer(
+            "q1", "question", [make_chunk()], settings=make_settings(tmp_path))
+        assert claims[0].cited_chunk_ids == ["c1"]
+        assert claims[0].text.startswith("特斯拉")
+
     def test_bare_string_claim_items_become_citeless_claims(self, tmp_path):
         FakeAnthropic.queue = [tool_response({
             "summary": "s", "claims": ["a bare string claim"],
@@ -111,12 +125,16 @@ class TestGenerateAnswer:
         assert len(claims) == 1                # second attempt accepted anyway
         assert summary                          # fallback text, never empty
 
-    def test_invalid_twice_raises(self, tmp_path):
+    def test_invalid_twice_degrades_gracefully(self, tmp_path):
+        # round 12: two malformed attempts used to raise -> raw error in
+        # the UI. Fail closed but not silent: templated scope note, zero
+        # claims, no invented content.
         bad = tool_response({"summary": "s"})  # claims key missing entirely
         FakeAnthropic.queue = [bad, tool_response({"summary": "s"})]
-        with pytest.raises(RuntimeError, match="invalid structured output"):
-            generation.generate_answer(
-                "q1", "question", [make_chunk()], settings=make_settings(tmp_path))
+        summary, claims = generation.generate_answer(
+            "q1", "question", [make_chunk()], settings=make_settings(tmp_path))
+        assert claims == []
+        assert "could not produce a verifiable structured answer" in summary
 
     def test_regeneration_feedback_included_in_prompt(self, tmp_path):
         FakeAnthropic.queue = [tool_response({"summary": "s", "claims": []})]

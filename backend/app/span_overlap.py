@@ -150,6 +150,37 @@ def token_overlap(claim_text: str, evidence_text: str) -> float | None:
     return len(claim_tokens & evidence_tokens) / len(claim_tokens)
 
 
+_FROM_TO_RE = re.compile(
+    r"from\s+\$?([\d,]+(?:\.\d+)?)\s*(billion|million|bn|mn)?"
+    r".{0,40}?to\s+\$?([\d,]+(?:\.\d+)?)\s*(billion|million|bn|mn)?"
+    r".{0,40}?(?:up|down|increase[d]? of|decrease[d]? of|[+\-])\s*"
+    r"([\d.]+)\s*%",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def arithmetic_consistent(claim_text: str) -> bool | None:
+    """Check "from X to Y, up Z%" patterns inside one claim (None = no
+    pattern). $4.9B -> $5.9B is +21%, not the +17% the claim printed —
+    the 17% implies the true base was $5.067B, so one of the numbers is
+    wrong. The judge compares claims to evidence, never a claim to
+    itself; this pure-code check closes that gap.
+    """
+
+    m = _FROM_TO_RE.search(claim_text)
+    if not m:
+        return None
+    x, xs, y, ys, z = m.groups()
+    x, y, z = float(x.replace(",", "")), float(y.replace(",", "")), float(z)
+    scale = {"billion": 1e9, "bn": 1e9, "million": 1e6, "mn": 1e6}
+    x *= scale.get((xs or "").lower(), 1)
+    y *= scale.get((ys or "").lower(), 1)
+    if x <= 0:
+        return None
+    implied = abs(y - x) / x * 100
+    return abs(implied - z) <= 1.5  # within 1.5pp of the stated rate
+
+
 def check_claim(claim_text: str, evidence_texts: list[str]) -> dict:
     """Run both checks for one claim against ALL its cited evidence combined.
 
@@ -167,8 +198,11 @@ def check_claim(claim_text: str, evidence_texts: list[str]) -> dict:
     evidence = "\n".join(evidence_texts)
     numbers = number_match(claim_text, evidence)
     tokens = token_overlap(claim_text, evidence)
+    arithmetic = arithmetic_consistent(claim_text)
     return {
         "number_match": numbers,
         "token_overlap": tokens,
-        "flagged": numbers is not None and numbers < 1.0,
+        "arithmetic_ok": arithmetic,
+        "flagged": ((numbers is not None and numbers < 1.0)
+                    or arithmetic is False),
     }

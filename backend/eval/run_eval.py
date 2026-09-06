@@ -234,10 +234,13 @@ def main() -> int:
     # ---- second axis: informativeness (faithful boilerplate scores a
     # perfect 0% unsupported while answering nothing) ----
     from app.boilerplate import boilerplate_flags
+    q_by_case = {c["case_id"]: c["question"] for c in cases}
     labeled = [(r["case_id"], text) for r in narrative
                for text in r.get("claim_texts", [])]
-    bp_flags = boilerplate_flags([text for _, text in labeled],
-                                 settings=settings)
+    bp_flags = boilerplate_flags(
+        [text for _, text in labeled],
+        settings=settings,
+        questions=[q_by_case.get(cid, "") for cid, _ in labeled])
     bp_rate = (sum(bp_flags) / len(bp_flags)) if bp_flags else 0.0
     print(f"BOILERPLATE RATE: {bp_rate:.2%}  "
           f"({sum(bp_flags)}/{len(bp_flags)} claims generic; gate at "

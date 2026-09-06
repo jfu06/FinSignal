@@ -102,6 +102,7 @@ _STMT_BY_METRIC: dict[str, str] = {
     "revenue": "income", "cost_of_revenue": "income", "gross_profit": "income",
     "research_and_development": "income", "sga_expense": "income",
     "operating_income": "income", "interest_expense": "income",
+    "pretax_income": "income",
     "net_income": "income", "eps_basic": "income", "eps_diluted": "income",
     "total_assets": "balance", "total_liabilities": "balance",
     "stockholders_equity": "balance", "cash_and_equivalents": "balance",
@@ -284,14 +285,22 @@ def _cik(ticker: str) -> int:
     return int(resolve_ticker(ticker)["cik"])
 
 
+# The metrics layer trusts ANNUAL REPORTS. Schwab's DEF 14A proxy tagged
+# NetIncomeLoss for FY2025 as 8,852,000 (a 1000x mis-scale of the 10-K's
+# 8,852,000,000), filed two months later — and dedup-by-latest-filed let a
+# proxy statement outvote the 10-K, printing a 0.0% net margin. Proxies,
+# 8-Ks and prospectuses never get a vote here.
+_ANNUAL_FORMS = ("10-K", "10-K/A")
+_REPORT_FORMS = ("10-K", "10-K/A", "10-Q", "10-Q/A")  # Q4 derivation only
+
+
 def _fetch(cik: int, taxonomy: str, tag: str, unit: str,
-           settings: Settings, accn: str | None = None) -> list[Fact]:
+           settings: Settings, accn: str | None = None,
+           forms: tuple = _ANNUAL_FORMS) -> list[Fact]:
     with connect(settings) as conn, conn.cursor() as cur:
         if accn is not None:
             # Oracle-document mode: only figures AS PRINTED in that one filing
-            # (incl. its comparative prior periods). Must hit xbrl_facts, not
-            # facts_dedup — the dedup view keeps the LATEST filing's row per
-            # period, which usually carries a different accession.
+            # (incl. its comparative prior periods).
             cur.execute(
                 """
                 SELECT DISTINCT ON (start_date, end_date)
@@ -304,13 +313,18 @@ def _fetch(cik: int, taxonomy: str, tag: str, unit: str,
                 (cik, taxonomy, tag, unit, accn),
             )
         else:
+            # Dedup AFTER the form filter — filtering the facts_dedup view
+            # would drop periods whose latest-filed row is a non-report.
             cur.execute(
                 """
-                SELECT start_date, end_date, val, accn, form, filed
-                FROM facts_dedup
+                SELECT DISTINCT ON (start_date, end_date)
+                    start_date, end_date, val, accn, form, filed
+                FROM xbrl_facts
                 WHERE cik = %s AND taxonomy = %s AND tag = %s AND unit = %s
+                  AND form = ANY(%s)
+                ORDER BY start_date, end_date, filed DESC, accn DESC
                 """,
-                (cik, taxonomy, tag, unit),
+                (cik, taxonomy, tag, unit, list(forms)),
             )
         return [Fact(r[0], r[1], float(r[2]), r[3], r[4] or "", r[5])
                 for r in cur.fetchall()]
@@ -438,6 +452,7 @@ RATIOS: dict[str, tuple[str, str]] = {
     "operating_margin": ("operating_income", "revenue"),
     "net_margin": ("net_income", "revenue"),
     "rnd_intensity": ("research_and_development", "revenue"),
+    "pretax_margin": ("pretax_income", "revenue"),
     "capex_intensity": ("capex", "revenue"),
     "da_margin": ("depreciation_amortization", "revenue"),
 }
@@ -482,7 +497,8 @@ def q4_single_quarter(ticker: str, metric: str, fy: int | None = None,
     if cik is None:
         cik = _cik(ticker)
     for taxonomy, tag in spec["tags"]:
-        facts = _fetch(cik, taxonomy, tag, spec["unit"], settings, accn=accn)
+        facts = _fetch(cik, taxonomy, tag, spec["unit"], settings, accn=accn,
+                       forms=_REPORT_FORMS)
         qs = quarters_within(facts, annual.period_start, annual.period_end)
         if len(qs) == 3:
             q4 = annual.value - sum(q.val for q in qs)

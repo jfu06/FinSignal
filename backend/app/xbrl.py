@@ -65,6 +65,15 @@ METRICS: dict[str, dict] = {
         "tags": [("us-gaap", "OperatingIncomeLoss")],
         "kind": "duration", "unit": "USD",
     },
+    "pretax_income": {
+        "tags": [("us-gaap",
+                  "IncomeLossFromContinuingOperationsBeforeIncomeTaxes"
+                  "ExtraordinaryItemsNoncontrollingInterest"),
+                 ("us-gaap",
+                  "IncomeLossFromContinuingOperationsBeforeIncomeTaxes"
+                  "MinorityInterestAndIncomeLossFromEquityMethodInvestments")],
+        "unit": "USD", "kind": "duration",
+    },
     "net_income": {
         "tags": [("us-gaap", "NetIncomeLoss")],
         "kind": "duration", "unit": "USD",

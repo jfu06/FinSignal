@@ -96,6 +96,19 @@ class AnswerPayload(BaseModel):
         normalized = []
         for item in claims:
             if isinstance(item, str) and item.strip():
+                # Observed failure mode: the model serializes a claim OBJECT
+                # into the string slot ('{"text": "...", "cited_chunk_ids":
+                # [...]}') — the citations drown inside the JSON string and
+                # the judge sees no evidence. Parse it back out.
+                if item.lstrip().startswith("{"):
+                    try:
+                        obj = json.loads(item)
+                        if isinstance(obj, dict) and str(
+                                obj.get("text", "")).strip():
+                            normalized.append(obj)
+                            continue
+                    except ValueError:
+                        pass
                 normalized.append({"text": item})
             elif isinstance(item, dict) and str(item.get("text", "")).strip():
                 normalized.append(item)
@@ -189,9 +202,12 @@ class RouteQuery(BaseModel):
 class RoutePayload(BaseModel):
     """record_route output; invalid shapes collapse to narrative (fail-open)."""
 
-    route: Literal["narrative", "numeric", "hybrid"] = "narrative"
+    route: Literal["narrative", "numeric", "hybrid",
+                   "out_of_scope"] = "narrative"
     queries: list[RouteQuery] = Field(default_factory=list)
     companies: list[str] = Field(default_factory=list)
+    refusal: str = ""              # out_of_scope: reply in the asker's language
+    fully_answers: bool = False    # numeric route must earn its purity
 
     @model_validator(mode="before")
     @classmethod
@@ -199,7 +215,7 @@ class RoutePayload(BaseModel):
         if not isinstance(data, dict):
             return {"route": "narrative", "queries": [], "companies": []}
         route = data.get("route")
-        if route not in ("narrative", "numeric", "hybrid"):
+        if route not in ("narrative", "numeric", "hybrid", "out_of_scope"):
             route = "narrative"
         queries = data.get("queries")
         if not isinstance(queries, list):
@@ -207,12 +223,15 @@ class RoutePayload(BaseModel):
         companies = data.get("companies")
         if not isinstance(companies, list):
             companies = []
+        refusal = data.get("refusal")
         return {
             "route": route,
             "queries": [q for q in queries
                         if isinstance(q, dict) and q.get("metric")],
             "companies": [c.strip().upper() for c in companies
                           if isinstance(c, str) and c.strip()],
+            "refusal": refusal if isinstance(refusal, str) else "",
+            "fully_answers": bool(data.get("fully_answers")),
         }
 
     @classmethod

@@ -114,3 +114,31 @@ class TestXbrlRescue:
     def test_no_figures_no_rescue(self):
         from app.span_overlap import values_match_facts
         assert values_match_facts("Growth was strong.", [1.0]) is False
+
+
+class TestArithmeticConsistency:
+    """Review round 9 P1: a claim's own numbers must add up."""
+
+    def test_inconsistent_from_to_pct_flagged(self):
+        from app.span_overlap import arithmetic_consistent
+        # 4.9 -> 5.9 is +21%, not +17% (the 17% implies base 5.067)
+        claim = ("Net income rose from $4.9 billion in 2023 to $5.9 billion "
+                 "in 2024 (up 17% year-over-year).")
+        assert arithmetic_consistent(claim) is False
+
+    def test_consistent_pattern_passes(self):
+        from app.span_overlap import arithmetic_consistent
+        claim = ("Net income rose from $5.067 billion to $5.942 billion, "
+                 "up 17.3% year-over-year.")
+        assert arithmetic_consistent(claim) is True
+
+    def test_no_pattern_is_na(self):
+        from app.span_overlap import arithmetic_consistent
+        assert arithmetic_consistent("Revenue grew strongly.") is None
+
+    def test_inconsistency_sets_flag(self):
+        result = check_claim(
+            "Sales went from $4.9 billion to $5.9 billion, up 17%.",
+            ["Sales were $4.9 billion then $5.9 billion."])
+        assert result["arithmetic_ok"] is False
+        assert result["flagged"] is True
