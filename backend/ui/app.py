@@ -809,7 +809,11 @@ if st.button(f"📊 Generate {ticker} annual report digest (~2 min)",
         st.warning("Session limit reached — refresh the page to start over.")
     elif daily_budget_left(settings().log_path,
                            settings().daily_query_budget) < DIGEST_QUERY_COST:
-        st.warning("Not enough daily budget left for a digest — try tomorrow.")
+        st.warning(
+            "Not enough daily allowance left for a digest — it resets at "
+            "midnight UTC, or contact "
+            "[joy.fu0531@gmail.com](mailto:joy.fu0531@gmail.com) for a plan."
+        )
     else:
         with st.chat_message("user"):
             st.markdown(f"**[{ticker}]** 📊 Annual report digest")
@@ -839,12 +843,17 @@ if prompt and prompt.strip():
     if len(history) >= settings().session_query_limit:
         st.warning(
             f"Session limit reached ({settings().session_query_limit} "
-            f"questions). Refresh the page to start a new session."
+            f"questions). Refresh the page to start a new session, or "
+            f"contact [joy.fu0531@gmail.com](mailto:joy.fu0531@gmail.com) "
+            f"to ask about a plan with higher limits."
         )
     elif daily_budget_left(settings().log_path, settings().daily_query_budget) <= 0:
         st.warning(
-            "Today's global query budget is used up — please come back "
-            "tomorrow. (This demo caps daily LLM spend.)"
+            f"Today's free query allowance "
+            f"({settings().daily_query_budget}/day) is used up — it resets "
+            f"at midnight UTC. Need more? Contact "
+            f"[joy.fu0531@gmail.com](mailto:joy.fu0531@gmail.com) to ask "
+            f"about a plan."
         )
     else:
         with st.chat_message("user"):

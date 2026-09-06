@@ -107,6 +107,6 @@ def get_settings() -> Settings:
         log_path=log_path,
         access_code=(os.getenv("ACCESS_CODE") or "").strip(),
         session_query_limit=_int("SESSION_QUERY_LIMIT", 10),
-        daily_query_budget=_int("DAILY_QUERY_BUDGET", 50),
+        daily_query_budget=_int("DAILY_QUERY_BUDGET", 10),
         max_tickers=_int("MAX_TICKERS", 0),  # 0 = unlimited (opt-in cap)
     )
