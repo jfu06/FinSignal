@@ -77,8 +77,12 @@ same language as the user's question.
 - For ATTRIBUTION questions ("what drove X?"), answer with drivers, not \
 levels: pair each driver with the filing's stated REASON (use the MD&A's own \
 explanation) and, when the chunks contain the figures, quantify each \
-driver's year-over-year CHANGE. Stay on the asked metric — operating \
-expenses are not a revenue driver.
+driver's year-over-year CHANGE and its SHARE of the total change (e.g. \
+"Services added \$13.0B — about half the \$25.1B total increase"). The \
+fastest-growing line is often NOT the largest contributor — say so when \
+true. Cover every dimension the evidence breaks down (product lines AND \
+regions). Stay on the asked metric — operating expenses are not a revenue \
+driver.
 - 3 to 6 claims, each ONE concise sentence (latency matters: no claim longer \
 than ~40 words). This is factual analysis, NOT investment advice: never \
 recommend buying, selling, or holding.\

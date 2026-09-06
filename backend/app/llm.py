@@ -25,11 +25,19 @@ def _tracing_enabled() -> bool:
     return os.getenv("LANGSMITH_TRACING", "").strip().lower() == "true"
 
 
+# SDK default is 600s — one hung socket stalls an answer for 10 minutes.
+# 90s comfortably covers the slowest real call (a ~2.4k-token judge batch
+# took ~21s); anything beyond it is a dead connection worth retrying.
+_REQUEST_TIMEOUT_S = 90.0
+
+
 def anthropic_client(settings: Settings, max_retries: int = 4) -> anthropic.Anthropic:
-    """Anthropic client with retries, LangSmith-wrapped when tracing is on."""
+    """Anthropic client with retries + a sane timeout, LangSmith-wrapped
+    when tracing is on."""
 
     client = anthropic.Anthropic(
-        api_key=settings.anthropic_api_key, max_retries=max_retries
+        api_key=settings.anthropic_api_key, max_retries=max_retries,
+        timeout=_REQUEST_TIMEOUT_S,
     )
     if not _tracing_enabled():
         return client
@@ -50,7 +58,8 @@ def openai_client(settings: Settings, max_retries: int = 4):
 
     from openai import OpenAI
 
-    client = OpenAI(api_key=settings.openai_api_key, max_retries=max_retries)
+    client = OpenAI(api_key=settings.openai_api_key, max_retries=max_retries,
+                    timeout=_REQUEST_TIMEOUT_S)
     if not _tracing_enabled():
         return client
     try:

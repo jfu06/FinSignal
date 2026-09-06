@@ -101,7 +101,17 @@ EVAL_COVERED = {"AAPL", "MSFT", "TSLA"}  # tickers the offline golden set covers
 
 @st.cache_resource
 def settings():
-    return get_settings()
+    s = get_settings()
+    # Warm the local embedding model off the request path: cold-loading it
+    # inside the first query costs ~9s of that user's answer.
+    def _warm():
+        try:
+            from app.embeddings import embed_query
+            embed_query("warmup", s)
+        except Exception:  # noqa: BLE001
+            pass
+    __import__("threading").Thread(target=_warm, daemon=True).start()
+    return s
 
 
 # --- access gate (public-deployment guardrail; disabled when no ACCESS_CODE) ---
@@ -411,6 +421,7 @@ def _highlight_support(claim_text: str, chunk_text: str) -> str:
     a <mark>; ties/no-overlap degrade to plain full text.
     """
 
+    chunk_text = _format_table_rows(chunk_text)
     sentences = _SENT_SPLIT.split(chunk_text)
     best_i, best_score = -1, 0.0
     for i, s in enumerate(sentences):
@@ -427,6 +438,30 @@ def _highlight_support(claim_text: str, chunk_text: str) -> str:
     body = " ".join(parts).replace("\n", "<br>")
     return (f'<div style="font-size:0.9rem; line-height:1.6;">'
             f'{body}</div>')
+
+
+_RE = __import__("re")
+
+
+def _format_table_rows(text: str) -> str:
+    """Readable column separators for flattened filing-table rows.
+
+    HTML-to-text ingestion glued table cells ("Americas$178,353 7 %$167,045
+    3 %$162,560"); rendering them verbatim makes click-through verification
+    a chore. Presentation only — stored text is untouched.
+    """
+
+    out = []
+    for line in text.split("\n"):
+        # glued header first (label-splitting would break its pattern):
+        # 2025Change2024Change2023
+        line = _RE.sub(r"(?<=\d)Change(?=\d)", "  |  Change  |  ", line)
+        # row label -> first figure: "Americas$178,353" / "iPad28,023"
+        line = _RE.sub(r"(?<=[A-Za-z)])(?=\$?\d)", "   ", line)
+        # between year columns: after a % (or (n)%) and before the next figure
+        line = _RE.sub(r"(?<=%)\s*(?=\(?\$?\d)", "   |   ", line)
+        out.append(line)
+    return "\n".join(out)
 
 
 def render_digest(digest: dict, key: str) -> None:

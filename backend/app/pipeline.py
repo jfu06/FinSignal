@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 import sys
 import time
 import uuid
@@ -82,6 +83,9 @@ def is_coverage_question(question: str) -> bool:
 
     return bool(_COVERAGE_RE.search(question))
 
+_NUMERIC_POOL = ThreadPoolExecutor(max_workers=4)
+
+
 class PipelineError(ValueError):
     """Invalid user input (unknown ticker, empty question, …)."""
 
@@ -96,6 +100,7 @@ class PipelineState(TypedDict, total=False):
     numeric_scope: dict            # oracle-doc numeric: {"cik", "accn"}
     route: str                     # narrative | numeric | hybrid
     coverage: bool                 # enumeration ask -> diversified retrieval
+    numeric_future: Any            # hybrid: metric queries running in parallel
     needs_onboarding: str          # ticker mentioned but not in the corpus
     numeric_queries: list[dict]
     numeric_results: list[dict]
@@ -264,6 +269,13 @@ def build_graph(settings: Settings):
         }}
 
     def numeric_node(state: PipelineState) -> PipelineState:
+        if state["route"] == "hybrid":
+            # The RAG line doesn't need the figures until assemble — run the
+            # metric queries concurrently instead of serially before retrieval.
+            future = _NUMERIC_POOL.submit(
+                execute_numeric, state["numeric_queries"], state["ticker"],
+                settings=settings, scope=state.get("numeric_scope") or None)
+            return {"numeric_future": future}
         results = execute_numeric(
             state["numeric_queries"], state["ticker"], settings=settings,
             scope=state.get("numeric_scope") or None)
@@ -344,6 +356,11 @@ def build_graph(settings: Settings):
             state["summary"], state["claims"], state["chunks"],
         )
         _xbrl_rescue_flags(report, state["ticker"], settings)
+        if state.get("numeric_future") is not None:
+            try:
+                report["numeric"] = state["numeric_future"].result(timeout=30)
+            except Exception:  # noqa: BLE001 — figures are additive in hybrid
+                pass
         report["retrieved_chunk_ids"] = [c.chunk_id for c in state["chunks"]]
         if state.get("coverage"):
             report["coverage_note"] = COVERAGE_NOTE
