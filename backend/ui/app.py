@@ -826,8 +826,17 @@ else:
 # --- one-click digest (cold-start entry point) ---
 if st.button(f"📊 Generate {ticker} annual report digest (~2 min)",
              use_container_width=True):
-    if len(history) >= settings().session_query_limit:
-        st.warning("Session limit reached — refresh the page to start over.")
+    _dg_visitor = _visitor_id()
+    if (_dg_visitor is not None
+            and visitor_queries_today(settings().log_path, _dg_visitor)
+            + DIGEST_QUERY_COST > settings().visitor_daily_limit):
+        st.warning(
+            "Not enough of your daily allowance left for a digest "
+            f"(it costs {DIGEST_QUERY_COST} of "
+            f"{settings().visitor_daily_limit} questions) — resets at "
+            "midnight UTC, or contact "
+            "[joy.fu0531@gmail.com](mailto:joy.fu0531@gmail.com) for a plan."
+        )
     elif daily_budget_left(settings().log_path,
                            settings().daily_query_budget) < DIGEST_QUERY_COST:
         st.warning(
@@ -836,6 +845,10 @@ if st.button(f"📊 Generate {ticker} annual report digest (~2 min)",
             "[joy.fu0531@gmail.com](mailto:joy.fu0531@gmail.com) for a plan."
         )
     else:
+        if _dg_visitor is not None:  # a digest spends 4 of the 10 questions
+            for _ in range(DIGEST_QUERY_COST):
+                log_event("visitor_query", settings().log_path,
+                          visitor=_dg_visitor)
         with st.chat_message("user"):
             st.markdown(f"**[{ticker}]** 📊 Annual report digest")
         with st.chat_message("assistant"):
@@ -862,14 +875,7 @@ if prompt and prompt.strip():
     prompt = prompt.strip()
     # --- usage guardrails: per-session limit + global daily budget ---
     _visitor = _visitor_id()
-    if len(history) >= settings().session_query_limit:
-        st.warning(
-            f"Session limit reached ({settings().session_query_limit} "
-            f"questions). Refresh the page to start a new session, or "
-            f"contact [joy.fu0531@gmail.com](mailto:joy.fu0531@gmail.com) "
-            f"to ask about a plan with higher limits."
-        )
-    elif (_visitor is not None
+    if (_visitor is not None
           and visitor_queries_today(settings().log_path, _visitor)
           >= settings().visitor_daily_limit):
         st.warning(
