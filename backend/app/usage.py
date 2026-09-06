@@ -28,7 +28,9 @@ def queries_today(log_path: str | Path, now: datetime | None = None) -> int:
                 # Operator-initiated eval traffic (release gate: "eval_…",
                 # FinanceBench: "fb_…") must not consume the visitor budget —
                 # a local benchmark run would otherwise lock the demo out.
-                if '"query_id": "eval' in line or '"query_id": "fb_' in line:
+                if ('"query_id": "eval' in line
+                        or '"query_id": "fb_' in line
+                        or '"query_id": "smoke_' in line):
                     continue
                 count += 1
     return count

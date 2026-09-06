@@ -136,6 +136,39 @@ def tickers() -> list[str]:
     return sorted(known_tickers(settings()))
 
 
+@st.cache_resource
+def _smoke_running() -> set:
+    """Tickers with a health check currently running (process-wide)."""
+
+    return set()
+
+
+def _start_smoke(target: str) -> None:
+    """Kick off the self-supervised health check in the background.
+
+    Fires automatically after onboarding (and for pre-existing unevaluated
+    companies) — quality checking is the system's job, not a button the
+    user must find. No st.* calls inside the thread; the sidebar picks up
+    the persisted result on the next rerun.
+    """
+
+    running = _smoke_running()
+    if target in running or load_smoke_result(target):
+        return
+    running.add(target)
+    s = settings()
+
+    def _work() -> None:
+        try:
+            run_smoke_eval(target, settings=s, progress=lambda *_: None)
+        except Exception:  # noqa: BLE001 — health check must never crash the app
+            pass
+        finally:
+            running.discard(target)
+
+    __import__("threading").Thread(target=_work, daemon=True).start()
+
+
 def _smoke_button(label: str, key: str, target: str) -> None:
     if st.button(label, use_container_width=True, key=key):
         with st.status("Running smoke check…", expanded=True) as s:
@@ -170,26 +203,27 @@ with st.sidebar:
         smoke = load_smoke_result(ticker)
         if smoke and smoke.get("passed"):
             st.caption(
-                f"🩺✅ Automated smoke check passed: evidence hit rate "
+                f"🩺✅ Automated health check passed: evidence hit rate "
                 f"{smoke['retrieval_hit_rate']:.0%}, unverified rate "
                 f"{smoke['unsupported_rate']:.0%}. (Not yet covered by the "
                 f"human-labeled eval set.)"
             )
         elif smoke:
             st.warning(
-                f"🩺 Smoke check FAILED (evidence hit rate "
+                f"🩺 Health check FAILED (evidence hit rate "
                 f"{smoke['retrieval_hit_rate']:.0%}, unverified rate "
                 f"{smoke['unsupported_rate']:.0%}, crashed questions "
                 f"{smoke['n_crashed']}). Treat answers for this company "
                 f"with caution."
             )
-            _smoke_button("🩺 Re-run smoke check (~2-4 min)", "rerun_smoke", ticker)
+            _smoke_button("🩺 Re-run health check (~2-4 min)", "rerun_smoke", ticker)
         else:
+            # not evaluated yet -> the system checks itself, no button
+            _start_smoke(ticker)
             st.caption(
-                "ℹ️ Added on demand — not yet evaluated. Every answer is still "
-                "claim-checked, but consider running the health check."
+                "🩺 Automated health check running in the background "
+                "(~2-4 min) — every answer is claim-checked meanwhile."
             )
-            _smoke_button("🩺 Run smoke check (~2-4 min)", "run_smoke", ticker)
 
     # --- on-demand onboarding: any US-listed ticker via SEC EDGAR ---
     with st.expander("➕ Add a company"):
@@ -219,6 +253,8 @@ with st.sidebar:
                                 ),
                                 state="complete",
                             )
+                        if result.get("status") == "added":
+                            _start_smoke(result["ticker"])
                         tickers.clear()          # refresh the dropdown
                         st.rerun()
                     except (EdgarError, OnboardingError) as exc:
