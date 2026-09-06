@@ -29,6 +29,7 @@ def make_settings(tmp_path: Path) -> Settings:
         access_code="",
         session_query_limit=10,
         daily_query_budget=50,
+        visitor_daily_limit=10,
         max_tickers=10,
     )
 

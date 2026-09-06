@@ -39,7 +39,8 @@ from app.digest import DIGEST_QUERY_COST, digest_summary, generate_digest  # noq
 from app.followup import condense_followup  # noqa: E402
 from app.smoke_eval import load_smoke_result, run_smoke_eval  # noqa: E402
 from app.span_overlap import token_overlap  # noqa: E402
-from app.usage import daily_budget_left  # noqa: E402
+from app.logging_utils import log_event  # noqa: E402
+from app.usage import daily_budget_left, visitor_queries_today  # noqa: E402
 
 st.set_page_config(page_title="FinSignal", page_icon="📑", layout="wide")
 
@@ -134,6 +135,26 @@ span[translate="no"] {
 """, unsafe_allow_html=True)
 
 EVAL_COVERED = {"AAPL", "MSFT", "TSLA"}  # tickers the offline golden set covers
+
+
+def _visitor_id() -> str | None:
+    """Stable per-person identifier: hashed client IP (never stored raw).
+
+    On Streamlit Cloud the client address arrives in X-Forwarded-For.
+    Returns None when no address is resolvable (local dev) — the
+    per-visitor limit then simply doesn't apply.
+    """
+
+    try:
+        headers = st.context.headers
+        ip = (headers.get("X-Forwarded-For", "").split(",")[0].strip()
+              or headers.get("Remote-Addr", ""))
+        if not ip:
+            return None
+        import hashlib
+        return hashlib.sha256(f"finsignal:{ip}".encode()).hexdigest()[:16]
+    except Exception:  # noqa: BLE001
+        return None
 
 
 @st.cache_resource
@@ -840,6 +861,7 @@ if not prompt:
 if prompt and prompt.strip():
     prompt = prompt.strip()
     # --- usage guardrails: per-session limit + global daily budget ---
+    _visitor = _visitor_id()
     if len(history) >= settings().session_query_limit:
         st.warning(
             f"Session limit reached ({settings().session_query_limit} "
@@ -847,15 +869,26 @@ if prompt and prompt.strip():
             f"contact [joy.fu0531@gmail.com](mailto:joy.fu0531@gmail.com) "
             f"to ask about a plan with higher limits."
         )
-    elif daily_budget_left(settings().log_path, settings().daily_query_budget) <= 0:
+    elif (_visitor is not None
+          and visitor_queries_today(settings().log_path, _visitor)
+          >= settings().visitor_daily_limit):
         st.warning(
-            f"Today's free query allowance "
-            f"({settings().daily_query_budget}/day) is used up — it resets "
-            f"at midnight UTC. Need more? Contact "
+            f"You've used your {settings().visitor_daily_limit} free "
+            f"questions for today — the allowance resets at midnight UTC. "
+            f"Need more? Contact "
             f"[joy.fu0531@gmail.com](mailto:joy.fu0531@gmail.com) to ask "
             f"about a plan."
         )
+    elif daily_budget_left(settings().log_path, settings().daily_query_budget) <= 0:
+        st.warning(
+            "The demo's total daily capacity is used up — it resets at "
+            "midnight UTC. Contact "
+            "[joy.fu0531@gmail.com](mailto:joy.fu0531@gmail.com) to ask "
+            "about a plan."
+        )
     else:
+        if _visitor is not None:
+            log_event("visitor_query", settings().log_path, visitor=_visitor)
         with st.chat_message("user"):
             st.markdown(f"**[{ticker}]** {prompt}")
         with st.chat_message("assistant"):

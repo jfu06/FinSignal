@@ -40,3 +40,27 @@ def daily_budget_left(log_path: str | Path, budget: int) -> int:
     """Remaining queries in today's global budget (never negative)."""
 
     return max(0, budget - queries_today(log_path))
+
+
+def visitor_queries_today(log_path: str | Path, visitor: str,
+                          now: datetime | None = None) -> int:
+    """Number of ``visitor_query`` events for this visitor today (UTC).
+
+    ``visitor`` is a hashed identifier (never a raw IP) written by the UI
+    at ask time — the per-person layer of the quota ("10 questions per
+    person per day"), beneath the global spend backstop.
+    """
+
+    path = Path(log_path)
+    if not path.exists():
+        return 0
+    day_prefix = f'{{"ts": "{(now or datetime.now(timezone.utc)).date().isoformat()}'
+    needle = f'"visitor": "{visitor}"'
+    count = 0
+    with path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            if (line.startswith(day_prefix)
+                    and '"event": "visitor_query"' in line
+                    and needle in line):
+                count += 1
+    return count

@@ -44,6 +44,7 @@ class Settings:
     # --- public-deployment guardrails (all no-ops by default for local dev) ---
     access_code: str            # non-empty -> UI requires this code to enter
     session_query_limit: int    # max questions per browser session
+    visitor_daily_limit: int    # max questions per person (hashed IP) per day
     daily_query_budget: int     # max questions per UTC day across all users
     max_tickers: int            # corpus-size cap for onboarding; 0 = unlimited
 
@@ -107,6 +108,7 @@ def get_settings() -> Settings:
         log_path=log_path,
         access_code=(os.getenv("ACCESS_CODE") or "").strip(),
         session_query_limit=_int("SESSION_QUERY_LIMIT", 10),
-        daily_query_budget=_int("DAILY_QUERY_BUDGET", 10),
+        daily_query_budget=_int("DAILY_QUERY_BUDGET", 50),
+        visitor_daily_limit=_int("VISITOR_DAILY_LIMIT", 10),
         max_tickers=_int("MAX_TICKERS", 0),  # 0 = unlimited (opt-in cap)
     )

@@ -68,3 +68,21 @@ class TestCorpusCap:
         with pytest.raises(onboarding.EdgarError, match="stop here"):
             onboarding.ensure_ticker("NVDA", settings=settings)
         assert called == ["NVDA"]
+
+
+class TestVisitorLimit:
+    def test_counts_only_this_visitor_today(self, tmp_path):
+        from app.logging_utils import log_event
+        from app.usage import visitor_queries_today
+        log = tmp_path / "events.jsonl"
+        for _ in range(3):
+            log_event("visitor_query", log, visitor="abc123")
+        log_event("visitor_query", log, visitor="other99")
+        log_event("query_received", log, visitor="abc123")  # wrong event type
+        assert visitor_queries_today(log, "abc123") == 3
+        assert visitor_queries_today(log, "other99") == 1
+        assert visitor_queries_today(log, "nobody") == 0
+
+    def test_missing_log_is_zero(self, tmp_path):
+        from app.usage import visitor_queries_today
+        assert visitor_queries_today(tmp_path / "nope.jsonl", "abc") == 0
