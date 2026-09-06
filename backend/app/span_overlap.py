@@ -121,6 +121,21 @@ def number_match(claim_text: str, evidence_text: str) -> float | None:
     return matched / len(claim_values)
 
 
+def values_match_facts(claim_text: str, fact_values: list[float]) -> bool:
+    """True if EVERY figure in the claim matches some official fact value.
+
+    The XBRL rescue channel: a claim can quote a company-level total its
+    cited excerpt doesn't repeat (the text explains, the table sits in
+    another chunk). Before flagging, check the figures against the
+    company's official XBRL facts — same scale ladder and tolerance.
+    """
+
+    claim_values = _values(claim_text)
+    if not claim_values:
+        return False
+    return all(_value_found(v, fact_values) for v in claim_values)
+
+
 def token_overlap(claim_text: str, evidence_text: str) -> float | None:
     """Fraction of the claim's English content words present in the evidence.
 

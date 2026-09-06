@@ -96,3 +96,21 @@ class TestUnitNormalization:
 
     def test_chinese_scale_words(self):
         assert number_match("总净销售额为4,161.61亿美元。", self.EV) == 1.0
+
+
+class TestXbrlRescue:
+    def test_all_figures_matching_official_facts(self):
+        from app.span_overlap import values_match_facts
+        facts = [416161e6, 391035e6, 33708e6]
+        claim = "Net sales grew to $416.2 billion from $391.0 billion."
+        assert values_match_facts(claim, facts) is True
+
+    def test_one_unknown_figure_fails_the_rescue(self):
+        from app.span_overlap import values_match_facts
+        facts = [416161e6]
+        claim = "Net sales were $416.2 billion and margin was $77.7 billion."
+        assert values_match_facts(claim, facts) is False
+
+    def test_no_figures_no_rescue(self):
+        from app.span_overlap import values_match_facts
+        assert values_match_facts("Growth was strong.", [1.0]) is False

@@ -262,8 +262,12 @@ def render_report(report: dict, key: str) -> None:
         badges += ('<span class="fs-badge fs-badge-num">🔢 Computed · '
                    'official SEC XBRL data · zero-LLM math</span>')
     if has_claims or not has_numeric:
-        badges += ('<span class="fs-badge fs-badge-doc">📄 From the filing · '
-                   'every claim verified</span>')
+        n_all = len(report.get("claims", []))
+        n_ok = sum(1 for c in report.get("claims", []) if not c["unverified"])
+        verified_label = ("every claim verified" if n_ok == n_all
+                          else f"{n_ok} of {n_all} claims verified")
+        badges += (f'<span class="fs-badge fs-badge-doc">📄 From the filing · '
+                   f'{verified_label}</span>')
     st.markdown(badges, unsafe_allow_html=True)
 
     # Verified figures (numeric line): deterministic math over official
@@ -374,8 +378,11 @@ def render_claim(c: dict) -> None:
     if sig.get("echoes"):
         meta += f" · 🔁 echoed in {', '.join(sig['echoes'])}"
     span = c.get("span_overlap") or {}
-    if span.get("flagged"):
-        meta += " · 🔢⚠️ figures don't match the cited text"
+    if span.get("xbrl_match"):
+        meta += " · 🔢 figures match official XBRL data"
+    elif span.get("flagged"):
+        meta += (" · 🔢⚠️ figures not found in cited text or official "
+                 "data — review advised")
     elif span.get("number_match") == 1.0:
         meta += " · 🔢 figures match citations"
     cls = "fs-claim warn" if c["unverified"] else "fs-claim"
@@ -417,8 +424,9 @@ def _highlight_support(claim_text: str, chunk_text: str) -> str:
             esc = (f'<mark style="background:#FDF0C8; padding:1px 2px; '
                    f'border-radius:3px;">{esc}</mark>')
         parts.append(esc)
+    body = " ".join(parts).replace("\n", "<br>")
     return (f'<div style="font-size:0.9rem; line-height:1.6;">'
-            f'{" ".join(parts)}</div>')
+            f'{body}</div>')
 
 
 def render_digest(digest: dict, key: str) -> None:

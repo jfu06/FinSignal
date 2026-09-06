@@ -114,6 +114,36 @@ def is_numeric_question(question: str) -> bool:
     return bool(_NUMERIC_RE.search(question))
 
 
+def _xbrl_rescue_flags(report: dict, ticker: str,
+                       settings: Settings) -> None:
+    """Second numeric channel: figures absent from the cited text but equal
+    to an official XBRL fact of this company are verified, not flagged.
+
+    (A claim often quotes the company-wide total while citing the excerpt
+    that EXPLAINS it — the table lives in a neighboring chunk.)
+    """
+
+    flagged = [c for c in report.get("claims", [])
+               if (c.get("span_overlap") or {}).get("flagged")]
+    if not flagged:
+        return
+    try:
+        from .edgar import resolve_ticker
+        from .span_overlap import values_match_facts
+
+        cik = int(resolve_ticker(ticker)["cik"])
+        with connect(settings) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT DISTINCT val FROM xbrl_facts WHERE cik = %s", (cik,))
+            facts = [float(r[0]) for r in cur.fetchall()]
+        for c in flagged:
+            if values_match_facts(c["text"], facts):
+                c["span_overlap"]["flagged"] = False
+                c["span_overlap"]["xbrl_match"] = True
+    except Exception:  # noqa: BLE001 — rescue channel, never critical
+        pass
+
+
 def _known_tickers(settings: Settings) -> set[str]:
     with connect(settings) as conn, conn.cursor() as cur:
         cur.execute("SELECT DISTINCT ticker FROM chunks WHERE corpus = 'live'")
@@ -313,6 +343,7 @@ def build_graph(settings: Settings):
             state["query_id"], state["question"], state["ticker"],
             state["summary"], state["claims"], state["chunks"],
         )
+        _xbrl_rescue_flags(report, state["ticker"], settings)
         report["retrieved_chunk_ids"] = [c.chunk_id for c in state["chunks"]]
         if state.get("coverage"):
             report["coverage_note"] = COVERAGE_NOTE
