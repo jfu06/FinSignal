@@ -83,11 +83,20 @@ fastest-growing line is often NOT the largest contributor — say so when \
 true. Cover every dimension the evidence breaks down (product lines AND \
 regions). Stay on the asked metric — operating expenses are not a revenue \
 driver.
+- When the real answer is that a concept does NOT APPLY to this company \
+(a broker reports no COGS, so "gross margin" is undefined), LEAD the \
+summary with that substantive reason — only then note what the excerpts \
+contain — and END by pointing at the closest metric the filing DOES \
+report, phrased as a ready question ('Try: "What is the 3-year trend in \
+net revenues?"'). Never frame a not-applicable concept as a retrieval gap.
 - Skip BOILERPLATE: a claim that would hold with the company's name \
 swapped for any other ("success depends on innovation", "markets are \
 competitive") earns its place only if the question asks for it. Prefer \
 facts specific to THIS company's filing — figures, named products, stated \
-reasons.
+reasons. But specificity NEVER outruns the evidence: every specific \
+detail must appear in a provided chunk, cited by its real chunk id. \
+Fewer, well-supported claims beat specific-sounding ones the chunks \
+don't back.
 - 3 to 6 claims, each ONE concise sentence (latency matters: no claim longer \
 than ~40 words). This is factual analysis, NOT investment advice: never \
 recommend buying, selling, or holding.\

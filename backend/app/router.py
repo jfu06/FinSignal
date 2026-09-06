@@ -98,6 +98,9 @@ You route questions for a financial filings QA system.
   figure panel: op=yoy for the metric AND its intensity/margin ratio when
   one exists (R&D -> rnd_intensity, capex -> capex_intensity) — level,
   growth, and share of revenue together tell the money story.
+  For "how much was spent on X" with NO year given, emit op=series
+  years=3, not a bare value — the recent trajectory (a buyback pause and
+  restart, a capex ramp) is the story a single point erases.
 
 Available metrics: {", ".join(sorted(METRICS))}
 Available ratios (use op="ratio"): {", ".join(sorted(RATIOS))}
@@ -191,6 +194,74 @@ def _fmt(value: float, unit: str) -> str:
         return f"{value / 1e9:,.2f}B shares" if abs(value) >= 1e9 \
             else f"{value / 1e6:,.1f}M shares"
     return f"{value:,.4g}"
+
+
+def _series_text(ticker: str, metric: str, pts_asc: list) -> str:  # noqa: ANN001
+    """Deterministic answer synthesis for a multi-year series.
+
+    A trend question answered with raw points isn't answered ("two flat
+    years, then +22%" IS the information). Per-year growth, window CAGR
+    and an acceleration/decline tag — all template arithmetic, no LLM.
+    """
+
+    parts = [f"FY{pts_asc[0].fy} {_fmt(pts_asc[0].value, pts_asc[0].unit)}"]
+    yoys: list[float] = []
+    for prev, cur in zip(pts_asc, pts_asc[1:]):
+        seg = f"FY{cur.fy} {_fmt(cur.value, cur.unit)}"
+        if prev.value:
+            g = (cur.value - prev.value) / abs(prev.value)
+            yoys.append(g)
+            seg += f" ({g:+.1%})"
+        parts.append(seg)
+    text = f"{ticker} {metric.replace('_', ' ')}: " + "; ".join(parts)
+    n = len(pts_asc) - 1
+    first, last = pts_asc[0].value, pts_asc[-1].value
+    extras = []
+    if n >= 2 and first > 0 and last > 0:
+        extras.append(f"{n}-yr CAGR {(last / first) ** (1 / n) - 1:+.1%}")
+    if len(yoys) >= 2:
+        if yoys[-1] > yoys[-2] + 0.10:
+            extras.append(f"growth accelerated in FY{pts_asc[-1].fy}")
+        elif yoys[-1] < yoys[-2] - 0.10:
+            extras.append(f"growth slowed in FY{pts_asc[-1].fy}")
+    if any(g < 0 for g in yoys):
+        down = [f"FY{c.fy}" for p_, c, g in
+                zip(pts_asc, pts_asc[1:], yoys) if g < 0]
+        extras.append(f"declined in {', '.join(down)}")
+    if extras:
+        text += " — " + "; ".join(extras)
+    return text
+
+
+def _subsume_results(results: list[dict]) -> list[dict]:
+    """Drop cards fully contained in another card's facts.
+
+    The planner splitting "revenue and growth" into value + yoy sub-queries
+    produced a bare-value card subsumed by the YoY card. Compare source
+    fact sets (accn, tag, period); strict subset → dropped, equal sets →
+    keep the more derived (longer) text.
+    """
+
+    def facts(r: dict) -> frozenset:
+        return frozenset((s["accn"], s.get("tag"), s["period_end"])
+                         for s in r["sources"])
+
+    keyed = [(facts(r), r) for r in results]
+    kept = []
+    for i, (fi, ri) in enumerate(keyed):
+        drop = False
+        for j, (fj, rj) in enumerate(keyed):
+            if i == j:
+                continue
+            if fi < fj:
+                drop = True
+                break
+            if fi == fj and (len(ri["text"]), -j) < (len(rj["text"]), -i):
+                drop = True
+                break
+        if not drop:
+            kept.append(ri)
+    return kept
 
 
 def _src(p) -> dict:  # noqa: ANN001
@@ -330,17 +401,21 @@ def _run_one(q: dict, default_ticker: str, settings: Settings,
                     sources += [_src(out[1]), _src(out[2])]
             if not per_year:
                 return {"ok": False}
-            trend = "; ".join(f"FY{y} {r:.1%}" for y, r in reversed(per_year))
-            return {"ok": True, "sources": sources,
-                    "text": f"{t} {metric.replace('_', ' ')} trend: {trend}"}
+            asc = list(reversed(per_year))
+            parts = [f"FY{asc[0][0]} {asc[0][1]:.1%}"]
+            for (_, prev), (y, cur) in zip(asc, asc[1:]):
+                parts.append(f"FY{y} {cur:.1%} ({(cur - prev) * 100:+.1f}pp)")
+            total_pp = (asc[-1][1] - asc[0][1]) * 100
+            text = (f"{t} {metric.replace('_', ' ')} trend: "
+                    + "; ".join(parts)
+                    + f" — {total_pp:+.1f}pp over {len(asc) - 1} years")
+            return {"ok": True, "sources": sources, "text": text}
         pts = get_series(t, metric, years=years, settings=settings,
                          cik=cik, accn=accn)
         if not pts:
             return {"ok": False}
-        trend = "; ".join(f"FY{p.fy} {_fmt(p.value, p.unit)}"
-                          for p in reversed(pts))
         return {"ok": True, "sources": [_src(p) for p in pts],
-                "text": f"{t} {metric.replace('_', ' ')}: {trend}"}
+                "text": _series_text(t, metric, list(reversed(pts)))}
 
     if op == "compare":
         pts = compare(tickers if len(tickers) > 1 else [default_ticker],
@@ -379,4 +454,4 @@ def execute_numeric(
         if r.get("ok"):
             r["query"] = q
             results.append(r)
-    return results
+    return _subsume_results(results)

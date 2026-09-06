@@ -168,13 +168,17 @@ class TestExecuteNumeric:
         out = execute_numeric(
             [{"op": "series", "metric": "gross_margin", "years": 3}],
             "AAPL", make_settings(tmp_path))
-        assert "FY2023 44.3%; FY2024 45.1%; FY2025 46.9%" in out[0]["text"]
+        assert ("FY2023 44.3%; FY2024 45.1% (+0.8pp); FY2025 46.9% (+1.8pp)"
+                in out[0]["text"])
+        assert "+2.6pp over 2 years" in out[0]["text"]
 
-    def test_query_cap(self, fake_metrics, tmp_path):
+    def test_query_cap_and_identical_results_collapse(
+            self, fake_metrics, tmp_path):
+        # at most 6 queries EXECUTE, and identical fact sets render ONE card
         out = execute_numeric(
             [{"op": "value", "metric": "revenue"}] * 10,
             "AAPL", make_settings(tmp_path))
-        assert len(out) == 6
+        assert len(out) == 1
 
 
 class TestRouteQuestion:
@@ -196,3 +200,39 @@ class TestRouteQuestion:
             "route": "numeric", "reason": "x", "queries": []})]
         r = route_question("q?", "AAPL", make_settings(tmp_path))
         assert r["route"] == "narrative"
+
+
+class TestSubsumption:
+    def test_value_card_subsumed_by_yoy_card(self, fake_metrics, tmp_path):
+        # review round 7 (SCHW): 'revenue FY2025: $23.92B' card fully
+        # contained in the '+22.0% YoY' card — one card, not two
+        out = execute_numeric(
+            [{"op": "value", "metric": "revenue"},
+             {"op": "yoy", "metric": "revenue"}],
+            "AAPL", make_settings(tmp_path))
+        assert len(out) == 1
+        assert "YoY" in out[0]["text"]
+
+
+class TestSeriesSynthesis:
+    def test_two_point_series_gets_growth(self, fake_metrics, tmp_path):
+        out = execute_numeric(
+            [{"op": "series", "metric": "revenue", "years": 3}],
+            "AAPL", make_settings(tmp_path))
+        assert "(+6.4%)" in out[0]["text"]  # per-year growth attached
+
+    def test_synthesis_growth_cagr_and_acceleration(self):
+        # review round 7 (SCHW): 18.84 -> 19.61 -> 23.92 answered as raw
+        # points; the flat-flat-jump shape IS the information
+        pts = [point(fy=2023, value=18.84e9), point(fy=2024, value=19.61e9),
+               point(fy=2025, value=23.92e9)]
+        text = router._series_text("SCHW", "revenue", pts)
+        assert "(+4.1%)" in text and "(+22.0%)" in text
+        assert "2-yr CAGR +12.7%" in text
+        assert "growth accelerated in FY2025" in text
+
+    def test_synthesis_flags_decline_years(self):
+        pts = [point(fy=2023, value=100.0e9), point(fy=2024, value=90.0e9),
+               point(fy=2025, value=95.0e9)]
+        text = router._series_text("T", "revenue", pts)
+        assert "declined in FY2024" in text

@@ -100,6 +100,7 @@ class PipelineState(TypedDict, total=False):
     numeric_scope: dict            # oracle-doc numeric: {"cik", "accn"}
     route: str                     # narrative | numeric | hybrid
     coverage: bool                 # enumeration ask -> diversified retrieval
+    route_degraded: bool           # numeric route fell back to narrative
     numeric_future: Any            # hybrid: metric queries running in parallel
     needs_onboarding: str          # ticker mentioned but not in the corpus
     numeric_queries: list[dict]
@@ -286,6 +287,7 @@ def build_graph(settings: Settings):
             log_event("numeric_fallback", settings.log_path,
                       query_id=state["query_id"])
             update["route"] = "narrative"
+            update["route_degraded"] = True
         return update
 
     def assemble_numeric(state: PipelineState) -> PipelineState:
@@ -380,6 +382,8 @@ def build_graph(settings: Settings):
             except Exception:  # noqa: BLE001 — figures are additive in hybrid
                 pass
         report["retrieved_chunk_ids"] = [c.chunk_id for c in state["chunks"]]
+        if state.get("route_degraded"):
+            report["route_degraded"] = True
         if state.get("coverage"):
             report["coverage_note"] = COVERAGE_NOTE
             # Materiality signals (quantified / realized / echoed) — see

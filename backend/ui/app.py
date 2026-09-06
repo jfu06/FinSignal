@@ -8,7 +8,7 @@ requirements.md on top of the existing pipeline (zero pipeline changes):
   explicitly acknowledges they are unverified.
 - Report export: download the full report as JSON.
 
-Plus: on-demand company onboarding from SEC EDGAR (~1 min) and an optional
+Plus: on-demand company onboarding from SEC EDGAR (~20 s) and an optional
 self-supervised smoke health-check per onboarded company.
 
 Run (from backend/):
@@ -51,7 +51,9 @@ html, body, [data-testid="stAppViewContainer"] * {
 }
 code, pre, .fs-mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
 /* the blanket font override must NOT catch Streamlit's icon font */
-[data-testid="stIconMaterial"], .material-icons {
+[data-testid="stIconMaterial"], .material-icons,
+[data-testid="stExpanderIcon"], [data-testid="stAlertDynamicIcon"],
+span[translate="no"] {
   font-family: 'Material Symbols Rounded' !important;
 }
 
@@ -194,7 +196,7 @@ with st.sidebar:
         new_ticker = st.text_input(
             "US ticker", placeholder="e.g. NVDA", max_chars=10, key="new_ticker"
         )
-        if st.button("Fetch 10-K from SEC EDGAR (~1 min)",
+        if st.button("Fetch 10-K from SEC EDGAR (~20 s)",
                      use_container_width=True):
             if not new_ticker.strip():
                 st.error("Please enter a ticker symbol.")
@@ -274,11 +276,22 @@ def render_report(report: dict, key: str) -> None:
     if has_claims or not has_numeric:
         n_all = len(report.get("claims", []))
         n_ok = sum(1 for c in report.get("claims", []) if not c["unverified"])
-        verified_label = ("every claim verified" if n_ok == n_all
-                          else f"{n_ok} of {n_all} claims verified")
+        if n_all == 0:
+            # "every claim verified" over an empty set reads as a bug —
+            # this is a no-grounded-answer outcome, name it honestly
+            verified_label = "no grounded claims · see explanation"
+        elif n_ok == n_all:
+            verified_label = "every claim verified"
+        else:
+            verified_label = f"{n_ok} of {n_all} claims verified"
         badges += (f'<span class="fs-badge fs-badge-doc">📄 From the filing · '
                    f'{verified_label}</span>')
     st.markdown(badges, unsafe_allow_html=True)
+    if report.get("route_degraded"):
+        st.caption(
+            "🔢→📄 This metric couldn't be computed from official XBRL data "
+            "for this company — answered from the filing text instead."
+        )
 
     # Verified figures (numeric line): deterministic math over official
     # XBRL filings — every number links to its SEC filing.
