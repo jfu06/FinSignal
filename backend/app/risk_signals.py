@@ -5,8 +5,10 @@ asserts "the biggest risk is X". But the document carries OBSERVABLE
 importance signals analysts read for themselves, and those we can extract
 deterministically (zero LLM):
 
-- quantified: the supporting evidence carries dollar/percent figures
-  (a €500M fine reads heavier than three lines of boilerplate)
+- quantified: the claim itself carries figures that match its cited
+  evidence (a €500M fine reads heavier than three lines of boilerplate);
+  a numberless claim citing a chunk that happens to contain numbers is
+  NOT quantified
 - realized: the filing uses have-happened language ("have adversely
   affected") rather than hypothetical "could" — the strongest signal
 - echoes: the same topic resurfaces in OTHER sections of the filing
@@ -21,6 +23,7 @@ import re
 
 from .config import Settings, get_settings
 from .models import Claim
+from .span_overlap import number_match
 
 # Realized-risk language: past/perfect constructions the filing uses when a
 # risk has already bitten. Ordered; first match's phrase is surfaced.
@@ -36,12 +39,7 @@ _REALIZED_PATTERNS = [
 _REALIZED_RE = re.compile("|".join(f"({p})" for p in _REALIZED_PATTERNS),
                           re.IGNORECASE)
 
-# Quantification: money or percentages in the evidence text.
-_QUANT_RE = re.compile(
-    r"[$€£¥]\s?[\d,]+(?:\.\d+)?|\d+(?:\.\d+)?\s?(?:%|percent)|"
-    r"\b[\d,]+(?:\.\d+)?\s?(?:billion|million)\b",
-    re.IGNORECASE,
-)
+
 
 
 def _norm_section(section: str | None) -> str:
@@ -62,7 +60,9 @@ def claim_signals(
     evidence = " ".join(evidence_texts)
 
     signals: dict = {}
-    if _QUANT_RE.search(evidence):
+    # quantified: the claim states figures AND they all check out against
+    # the cited text — a claim-level fact, not "the chunk contains numbers"
+    if number_match(claim.text, evidence) == 1.0:
         signals["quantified"] = True
     m = _REALIZED_RE.search(evidence)
     if m:

@@ -433,17 +433,33 @@ class TestRiskSignals:
             settings=make_settings(tmp_path))
         assert s["realized"].lower() == "have adversely affected"
 
-    def test_quantified_detected(self, monkeypatch, tmp_path):
+    def test_quantified_requires_matching_figures_in_the_claim(
+            self, monkeypatch, tmp_path):
         from app import risk_signals
         import app.retrieval as retrieval
         monkeypatch.setattr(retrieval, "retrieve", lambda *a, **k: [])
         s = risk_signals.claim_signals(
-            self._claim("DMA fine"),
+            self._claim("The DMA resulted in a €500 million fine."),
             ["the Commission imposed a fine of €500 million, up to 10% of "
              "worldwide net sales"],
             ["Item 3. Legal Proceedings"], "AAPL",
             settings=make_settings(tmp_path))
         assert s["quantified"] is True
+
+    def test_numberless_claim_citing_numeric_chunk_not_quantified(
+            self, monkeypatch, tmp_path):
+        # review round 5: 'markets are highly competitive' cited a chunk
+        # whose only numbers were distribution-channel 40%/60% — unrelated
+        from app import risk_signals
+        import app.retrieval as retrieval
+        monkeypatch.setattr(retrieval, "retrieve", lambda *a, **k: [])
+        s = risk_signals.claim_signals(
+            self._claim("Apple describes its markets as highly competitive."),
+            ["net sales through direct and indirect channels accounted for "
+             "40% and 60%, respectively, of total net sales for $12,345."],
+            ["Item 1. Business"], "AAPL",
+            settings=make_settings(tmp_path))
+        assert "quantified" not in s
 
     def test_echoes_count_other_sections_only(self, monkeypatch, tmp_path):
         from app import risk_signals
@@ -461,3 +477,21 @@ class TestRiskSignals:
             settings=make_settings(tmp_path))
         assert s["echoes"] == ["Item 7. MD&A"]
         assert "quantified" not in s and "realized" not in s
+
+
+class TestRiskFlagsGate:
+    def test_unverified_risk_claims_never_reach_risk_flags(self):
+        # review round 5: a NOT_ENOUGH_INFO risk claim appeared in the
+        # Risk flags summary unmarked, before acknowledgment
+        from app.assembler import assemble_report
+        from app.models import Verdict
+        ok = Claim(claim_id="q_c1", query_id="q", text="verified risk",
+                   cited_chunk_ids=["c1"])
+        ok.kind = "risk"; ok.verdict = Verdict.SUPPORTED
+        warn = Claim(claim_id="q_c2", query_id="q", text="unverified risk",
+                     cited_chunk_ids=["c1"])
+        warn.kind = "risk"; warn.verdict = Verdict.NOT_ENOUGH_INFO
+        report = assemble_report(
+            "q", "question?", "AAPL", "summary", [ok, warn],
+            [make_chunk()])
+        assert report["risk_flags"] == ["verified risk"]

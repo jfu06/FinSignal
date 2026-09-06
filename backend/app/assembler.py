@@ -123,7 +123,9 @@ def assemble_report(
                     "reason": claim.judge_reason,
                 }
             )
-        if entry["kind"] == "risk":
+        if entry["kind"] == "risk" and status is ClaimStatus.OK:
+            # WARNING claims stay behind the acknowledgment gate — the flags
+            # summary must never present unverified text as plain risk facts
             risk_flags.append(claim.text)
 
     return {
