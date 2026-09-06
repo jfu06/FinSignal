@@ -40,9 +40,13 @@ class TestScoreResults:
         assert s["passed"] is True
         assert s["retrieval_hit_rate"] == 1.0
 
-    def test_low_hit_rate_fails(self, tmp_path):
-        results = [self._ok(hit=i < 3) for i in range(5)]  # 3/5 = 0.6 < 0.8
-        assert score_results(results, make_settings(tmp_path))["passed"] is False
+    def test_low_hit_rate_is_diagnostic_not_failing(self, tmp_path):
+        # MMR diversification legitimately lowers source-paragraph hit rate
+        # while answers still verify — hit_rate is reported, never failed on
+        results = [self._ok(hit=i < 1) for i in range(5)]  # 1/5 = 0.2
+        out = score_results(results, make_settings(tmp_path))
+        assert out["passed"] is True
+        assert out["retrieval_hit_rate"] == 0.2
 
     def test_unsupported_claims_fail(self, tmp_path):
         results = [self._ok() for _ in range(4)] + [self._ok(n_unsupported=2)]

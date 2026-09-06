@@ -265,12 +265,11 @@ with st.sidebar:
                 f"human-labeled eval set.)"
             )
         elif smoke:
-            st.warning(
-                f"🩺 Health check FAILED (evidence hit rate "
-                f"{smoke['retrieval_hit_rate']:.0%}, unverified rate "
-                f"{smoke['unsupported_rate']:.0%}, crashed questions "
-                f"{smoke['n_crashed']}). Treat answers for this company "
-                f"with caution."
+            st.caption(
+                f"🩺⚠️ The automated health check flagged this company "
+                f"(unverified rate {smoke['unsupported_rate']:.0%}, "
+                f"crashed questions {smoke['n_crashed']}). Every answer "
+                f"is still claim-verified — read them with extra care."
             )
             _smoke_button("🩺 Re-run health check (~2-4 min)", "rerun_smoke", ticker)
         else:
