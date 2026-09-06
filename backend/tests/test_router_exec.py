@@ -314,3 +314,24 @@ class TestFullyAnswersContract:
             "queries": [{"op": "value", "metric": "revenue"}]})]
         r = route_question("pre-tax margin?", "SCHW", make_settings(tmp_path))
         assert r["route"] == "hybrid"  # text line must answer the question
+
+
+class TestFutureFiscalYearGuard:
+    def test_financial_question_never_refused(self, tmp_path):
+        # gn04 flake: FY2026 (already filed — FY labels run ahead of the
+        # calendar) was intermittently judged forward-looking out_of_scope
+        FakeAnthropic.queue = [tool_response({
+            "route": "out_of_scope", "reason": "future year",
+            "refusal": "FY2026 has not happened yet.", "fully_answers": False})]
+        r = route_question(
+            "How much revenue did Microsoft report for fiscal year 2026?",
+            "MSFT", make_settings(tmp_path))
+        assert r["route"] == "narrative"  # deterministic demotion
+
+    def test_true_out_of_scope_still_refused(self, tmp_path):
+        FakeAnthropic.queue = [tool_response({
+            "route": "out_of_scope", "reason": "weather",
+            "refusal": "This system answers SEC filings questions.",
+            "fully_answers": False})]
+        r = route_question("今天天气怎么样", "MSFT", make_settings(tmp_path))
+        assert r["route"] == "out_of_scope"

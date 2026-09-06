@@ -19,6 +19,9 @@ backend/logs/*.jsonl
 # --- Local corpus (downloaded manually; not committed) ---
 backend/data/raw/*
 !backend/data/raw/.gitkeep
+# health-check results ship with the repo so the deployed container starts
+# with every corpus company already verified (no visitor-facing cold runs)
+!backend/data/raw/*_smoke.json
 
 # --- FinanceBench: dataset jsonl is committed; fetched filing text is not ---
 backend/data/benchmark/raw/

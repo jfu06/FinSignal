@@ -199,12 +199,59 @@ def _smoke_path(ticker: str) -> Path:
     return DATA_RAW / f"{ticker.upper()}_smoke.json"
 
 
+def numeric_probes(ticker: str, settings: Settings) -> dict:
+    """Deterministic numeric-layer probes — zero LLM, a few DB lookups.
+
+    The question-based smoke test never touches the numeric channel, yet
+    that channel produced the worst real incidents (a proxy statement's
+    1000x mis-scaled net income, a stale-tag FY2021 figure). Each probe
+    guards a failure mode that actually happened:
+
+    - revenue / net income resolvable from official facts (registry+data)
+    - net margin within ±100% (scale pollution prints absurd ratios)
+    - latest annual figure is recent (stale-tag migration detection)
+    """
+
+    from datetime import date
+
+    from .metrics import get_metric
+
+    notes: list[str] = []
+    ok = True
+    try:
+        rev = get_metric(ticker, "revenue", settings=settings)
+        ni = (get_metric(ticker, "net_income", fy=rev.fy, settings=settings)
+              if rev is not None
+              else get_metric(ticker, "net_income", settings=settings))
+        if rev is None:
+            ok, _ = False, notes.append("revenue not resolvable from official data")
+        if ni is None:
+            ok, _ = False, notes.append("net income not resolvable from official data")
+        if rev is not None and ni is not None and rev.value > 0:
+            margin = ni.value / rev.value
+            # both pollution directions: a 1000x-inflated numerator blows
+            # past ±100%; the REAL incident (a proxy's 1000x-shrunken net
+            # income) printed a 0.04% margin — absurdly small but in range
+            if not -1.0 <= margin <= 1.0 or 0 < abs(margin) < 0.001:
+                ok = False
+                notes.append(f"net margin {margin:.2%} implausible — "
+                             f"scale pollution suspected")
+        if rev is not None and rev.fy < date.today().year - 2:
+            ok = False
+            notes.append(f"latest annual revenue is FY{rev.fy} — stale tag?")
+    except Exception as exc:  # noqa: BLE001
+        ok = False
+        notes.append(f"numeric layer error: {exc}")
+    return {"numeric_ok": ok, "numeric_notes": notes}
+
+
 def _recompute_passed(r: dict) -> dict:
     """Apply the current pass criteria to a stored result (old files were
     judged under the stricter hit-rate rule)."""
 
     r["passed"] = (r.get("n_crashed", 1) == 0
-                   and r.get("unsupported_rate", 1.0) <= 0.04)
+                   and r.get("unsupported_rate", 1.0) <= 0.04
+                   and r.get("numeric_ok", True))  # old files lack probes
     return r
 
 
@@ -286,10 +333,13 @@ def run_smoke_eval(
         results.append(entry)
 
     summary = score_results(results, settings)
+    probes = numeric_probes(ticker, settings)
+    summary["passed"] = summary["passed"] and probes["numeric_ok"]
     record = {
         "ticker": ticker,
         "ts": datetime.now(timezone.utc).isoformat(),
         **summary,
+        **probes,
         "questions": results,
     }
     _smoke_path(ticker).parent.mkdir(parents=True, exist_ok=True)

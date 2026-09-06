@@ -336,3 +336,53 @@ class TestClassifyStatements:
     def test_malformed_xml_yields_empty(self):
         from app.metrics import classify_statements
         assert classify_statements("<not-xml") == {}
+
+
+from tests.llm_fakes import make_settings  # noqa: E402
+
+
+class TestTagMigrationLatest:
+    def test_latest_picks_newest_period_across_tags(self, monkeypatch, tmp_path):
+        # NVDA moved revenue RevenueFromContract… -> Revenues in FY2023;
+        # priority-order-first shipped a four-year-old figure as "latest"
+        from datetime import date
+        from app import metrics
+        from app.metrics import Fact, get_metric
+
+        def fake_fetch(cik, taxonomy, tag, unit, settings, accn=None,
+                       forms=None):
+            if tag == "RevenueFromContractWithCustomerExcludingAssessedTax":
+                return [Fact(date(2021, 2, 1), date(2022, 1, 30), 26.9e9,
+                             "a-old", "10-K", date(2022, 3, 1))]
+            if tag == "Revenues":
+                return [Fact(date(2025, 1, 27), date(2026, 1, 25), 215.9e9,
+                             "a-new", "10-K", date(2026, 3, 1))]
+            return []
+
+        monkeypatch.setattr(metrics, "_fetch", fake_fetch)
+        monkeypatch.setattr(metrics, "_cik", lambda t: 1045810)
+        monkeypatch.setattr(metrics, "_primary_doc", lambda *a: None)
+        monkeypatch.setattr(metrics, "_stmt_url", lambda *a: "")
+        p = get_metric("NVDA", "revenue", settings=make_settings(tmp_path))
+        assert p.fy == 2026 and p.value == 215.9e9
+        assert p.tag == "us-gaap:Revenues"
+
+    def test_explicit_year_still_honors_tag_priority(self, monkeypatch, tmp_path):
+        from datetime import date
+        from app import metrics
+        from app.metrics import Fact, get_metric
+
+        def fake_fetch(cik, taxonomy, tag, unit, settings, accn=None,
+                       forms=None):
+            if tag == "RevenueFromContractWithCustomerExcludingAssessedTax":
+                return [Fact(date(2021, 2, 1), date(2022, 1, 30), 26.9e9,
+                             "a-old", "10-K", date(2022, 3, 1))]
+            return []
+
+        monkeypatch.setattr(metrics, "_fetch", fake_fetch)
+        monkeypatch.setattr(metrics, "_cik", lambda t: 1045810)
+        monkeypatch.setattr(metrics, "_primary_doc", lambda *a: None)
+        monkeypatch.setattr(metrics, "_stmt_url", lambda *a: "")
+        p = get_metric("NVDA", "revenue", fy=2022,
+                       settings=make_settings(tmp_path))
+        assert p.fy == 2022 and p.value == 26.9e9

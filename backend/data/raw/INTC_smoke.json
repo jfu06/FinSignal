@@ -1,0 +1,56 @@
+{
+  "ticker": "INTC",
+  "ts": "2026-09-06T06:59:25.029681+00:00",
+  "n_questions": 5,
+  "n_crashed": 0,
+  "retrieval_hits": 5,
+  "retrieval_hit_rate": 1.0,
+  "total_claims": 19,
+  "unsupported_claims": 0,
+  "unsupported_rate": 0.0,
+  "passed": true,
+  "numeric_ok": true,
+  "numeric_notes": [],
+  "questions": [
+    {
+      "question": "What organizational changes did Intel make in 2025 to accelerate decision-making and innovation?",
+      "source_chunk": "INTC_10K_2026_0017",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 1,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What types of accelerators does Intel pair with its x86 CPUs to optimize performance across different workloads?",
+      "source_chunk": "INTC_10K_2026_0020",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 4,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What is Intel's concern regarding customer adoption if the company were to pause development of future leading-edge process nodes like Intel 14A?",
+      "source_chunk": "INTC_10K_2026_0163",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 6,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What was the outcome of the securities class action lawsuit filed against Intel in May 2024 regarding foundry business statements?",
+      "source_chunk": "INTC_10K_2026_0381",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 5,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What framework did Intel's management use to assess the effectiveness of internal control over financial reporting?",
+      "source_chunk": "INTC_10K_2026_0398",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 3,
+      "n_unsupported": 0
+    }
+  ]
+}

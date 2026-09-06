@@ -1,0 +1,56 @@
+{
+  "ticker": "AMD",
+  "ts": "2026-09-06T06:30:34.428399+00:00",
+  "n_questions": 5,
+  "n_crashed": 0,
+  "retrieval_hits": 2,
+  "retrieval_hit_rate": 0.4,
+  "total_claims": 6,
+  "unsupported_claims": 0,
+  "unsupported_rate": 0.0,
+  "passed": true,
+  "questions": [
+    {
+      "question": "What was the total amount of deferred tax assets before the valuation allowance was applied as of December 27, 2025?",
+      "source_chunk": "AMD_10K_2026_0261",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 3,
+      "n_unsupported": 0
+    },
+    {
+      "question": "On what date did AMD form GLOBALFOUNDRIES Inc., and which entities were involved in that transaction?",
+      "source_chunk": "AMD_2015_10K_0241",
+      "retrieval_hit": false,
+      "hit_type": "none",
+      "n_claims": 0,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What geographic location is mentioned as a significant operational concern for AMD due to natural disaster risk?",
+      "source_chunk": "AMD_2015_10K_0110",
+      "retrieval_hit": false,
+      "hit_type": "none",
+      "n_claims": 3,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What was AMD's total debt amount as of December 26, 2015?",
+      "source_chunk": "AMD_2015_10K_0072",
+      "retrieval_hit": false,
+      "hit_type": "none",
+      "n_claims": 0,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What was the total fair value of PRSUs that vested during 2022?",
+      "source_chunk": "AMD_2022_10K_0252",
+      "retrieval_hit": true,
+      "hit_type": "equivalent",
+      "n_claims": 0,
+      "n_unsupported": 0
+    }
+  ],
+  "numeric_ok": true,
+  "numeric_notes": []
+}

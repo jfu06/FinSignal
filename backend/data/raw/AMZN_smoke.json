@@ -1,0 +1,56 @@
+{
+  "ticker": "AMZN",
+  "ts": "2026-09-06T06:32:28.898312+00:00",
+  "n_questions": 5,
+  "n_crashed": 0,
+  "retrieval_hits": 3,
+  "retrieval_hit_rate": 0.6,
+  "total_claims": 19,
+  "unsupported_claims": 0,
+  "unsupported_rate": 0.0,
+  "passed": true,
+  "questions": [
+    {
+      "question": "What intellectual property claims has Amazon been sued over in December 2025, and which Amazon services are allegedly affected?",
+      "source_chunk": "AMZN_10K_2026_0189",
+      "retrieval_hit": false,
+      "hit_type": "none",
+      "n_claims": 0,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What was the outcome of Amazon's annual goodwill and indefinite-lived intangible asset impairment test as of April 1, 2025?",
+      "source_chunk": "AMZN_10K_2026_0150",
+      "retrieval_hit": false,
+      "hit_type": "none",
+      "n_claims": 0,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What are the terms and conditions of Amazon's unsecured revolving credit facilities as of 2025?",
+      "source_chunk": "AMZN_10K_2026_0177",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 6,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What challenges does Amazon face in managing its fulfillment network and inventory operations?",
+      "source_chunk": "AMZN_10K_2026_0035",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 7,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What were Amazon's operating cash flows in 2024 and 2025, and what factors contributed to the change?",
+      "source_chunk": "AMZN_10K_2026_0081",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 6,
+      "n_unsupported": 0
+    }
+  ],
+  "numeric_ok": true,
+  "numeric_notes": []
+}

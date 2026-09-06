@@ -1,0 +1,56 @@
+{
+  "ticker": "GOOG",
+  "ts": "2026-09-06T06:36:52.115156+00:00",
+  "n_questions": 5,
+  "n_crashed": 0,
+  "retrieval_hits": 3,
+  "retrieval_hit_rate": 0.6,
+  "total_claims": 28,
+  "unsupported_claims": 1,
+  "unsupported_rate": 0.03571428571428571,
+  "passed": true,
+  "questions": [
+    {
+      "question": "What are the different ways that Google's competitors can affect its competitive position?",
+      "source_chunk": "GOOG_10K_2026_0035",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 10,
+      "n_unsupported": 1
+    },
+    {
+      "question": "What are the main revenue sources that Google Services generates beyond advertising?",
+      "source_chunk": "GOOG_10K_2026_0016",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 5,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What types of legal matters and remedies are some of Google's outstanding cases seeking?",
+      "source_chunk": "GOOG_10K_2026_0224",
+      "retrieval_hit": false,
+      "hit_type": "none",
+      "n_claims": 7,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What are the total future operating lease payment obligations that Alphabet has committed to as of December 31, 2025?",
+      "source_chunk": "GOOG_10K_2026_0211",
+      "retrieval_hit": false,
+      "hit_type": "none",
+      "n_claims": 0,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What are the different interest rate percentages and maturity dates of the notes that Alphabet issued?",
+      "source_chunk": "GOOG_10K_2026_0266",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 6,
+      "n_unsupported": 0
+    }
+  ],
+  "numeric_ok": true,
+  "numeric_notes": []
+}

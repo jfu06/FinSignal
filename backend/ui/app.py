@@ -427,12 +427,13 @@ def render_report(report: dict, key: str) -> None:
                                   and not report["claims"]):
         st.markdown(report["summary"].replace("$", "\\$"))
     if report.get("coverage_note"):
-        st.caption(
-            f"ℹ️ {report['coverage_note']} Signal badges — 🔢 quantified / "
-            f"⚡ realized / 🔁 echoed elsewhere in the filing — are "
-            f"document facts you can verify in the cited text; ranking is "
-            f"yours to make."
-        )
+        _any_signals = any(c.get("signals") for c in report.get("claims", []))
+        legend = (
+            " Signal badges — 🔢 quantified / ⚡ realized / 🔁 echoed "
+            "elsewhere in the filing — are document facts you can verify "
+            "in the cited text; ranking is yours to make."
+        ) if _any_signals else ""  # a legend for absent badges reads as broken
+        st.caption(f"ℹ️ {report['coverage_note']}{legend}")
     ok_claims = [c for c in report["claims"] if not c["unverified"]]
     warn_claims = [c for c in report["claims"] if c["unverified"]]
     if not report["claims"] and report.get("latency_s"):
@@ -463,7 +464,10 @@ def render_report(report: dict, key: str) -> None:
             f"filing were blocked and are not shown.",
             icon="⛔",
         )
-    if report["risk_flags"]:
+    # A block containing 100% of the claims isn't a block (review round
+    # 16: six risk claims were duplicated verbatim right below themselves)
+    if (report["risk_flags"]
+            and len(report["risk_flags"]) < len(report["claims"])):
         st.markdown("**Risk flags**")
         for r in report["risk_flags"]:
             st.markdown(f"- 🚩 {r}")

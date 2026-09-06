@@ -1,0 +1,56 @@
+{
+  "ticker": "NVDA",
+  "ts": "2026-09-06T06:42:03.868340+00:00",
+  "n_questions": 5,
+  "n_crashed": 0,
+  "retrieval_hits": 3,
+  "retrieval_hit_rate": 0.6,
+  "total_claims": 26,
+  "unsupported_claims": 1,
+  "unsupported_rate": 0.038461538461538464,
+  "passed": true,
+  "questions": [
+    {
+      "question": "What types of investments has NVIDIA made in private companies, and what guarantees has the company provided to support datacenter infrastructure development?",
+      "source_chunk": "NVDA_10K_2026_0146",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 7,
+      "n_unsupported": 1
+    },
+    {
+      "question": "What are NVIDIA's two primary operating segments?",
+      "source_chunk": "NVDA_10K_2026_0142",
+      "retrieval_hit": false,
+      "hit_type": "none",
+      "n_claims": 3,
+      "n_unsupported": 0
+    },
+    {
+      "question": "Which NVIDIA reporting unit received the largest allocation of goodwill increase during fiscal year 2026?",
+      "source_chunk": "NVDA_10K_2026_0226",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 4,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What are the key software stacks and platforms that NVIDIA has developed for specific industries over the past five years?",
+      "source_chunk": "NVDA_10K_2026_0010",
+      "retrieval_hit": false,
+      "hit_type": "none",
+      "n_claims": 7,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What key areas did the auditors focus on when testing NVIDIA's controls related to inventory provisions?",
+      "source_chunk": "NVDA_10K_2026_0194",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 5,
+      "n_unsupported": 0
+    }
+  ],
+  "numeric_ok": true,
+  "numeric_notes": []
+}

@@ -103,6 +103,9 @@ class TestRunSmokeEval:
                     "retrieved_chunk_ids": [src, "other"]}
 
         monkeypatch.setattr(smoke_eval, "answer_question", fake_answer)
+        monkeypatch.setattr(smoke_eval, "numeric_probes",
+                            lambda t_, s_: {"numeric_ok": True,
+                                            "numeric_notes": []})
 
         record = run_smoke_eval("nvda", settings=make_settings(tmp_path))
 
@@ -117,3 +120,39 @@ class TestRunSmokeEval:
         monkeypatch.setattr(smoke_eval, "sample_chunks", lambda t, n, s: [])
         with pytest.raises(ValueError, match="No corpus"):
             run_smoke_eval("ZZZZ", settings=make_settings(tmp_path))
+
+
+class TestNumericProbes:
+    def test_scale_pollution_flagged(self, monkeypatch, tmp_path):
+        from app import smoke_eval
+        from types import SimpleNamespace as NS
+
+        def fake_metric(ticker, metric, settings=None, fy=None):
+            if metric == "revenue":
+                return NS(value=23.9e9, fy=2025)
+            return NS(value=8.85e6, fy=2025)  # 1000x mis-scaled net income
+
+        import app.metrics as metrics
+        monkeypatch.setattr(metrics, "get_metric", fake_metric)
+        out = smoke_eval.numeric_probes("SCHW", make_settings(tmp_path))
+        assert out["numeric_ok"] is False
+        assert any("scale pollution" in n for n in out["numeric_notes"])
+
+    def test_healthy_figures_pass(self, monkeypatch, tmp_path):
+        from app import smoke_eval
+        from types import SimpleNamespace as NS
+        import app.metrics as metrics
+        monkeypatch.setattr(
+            metrics, "get_metric",
+            lambda t, m, settings=None, fy=None: NS(
+                value=23.9e9 if m == "revenue" else 8.85e9, fy=2025))
+        out = smoke_eval.numeric_probes("SCHW", make_settings(tmp_path))
+        assert out["numeric_ok"] is True and out["numeric_notes"] == []
+
+    def test_missing_facts_flagged(self, monkeypatch, tmp_path):
+        from app import smoke_eval
+        import app.metrics as metrics
+        monkeypatch.setattr(metrics, "get_metric",
+                            lambda t, m, settings=None, fy=None: None)
+        out = smoke_eval.numeric_probes("T", make_settings(tmp_path))
+        assert out["numeric_ok"] is False

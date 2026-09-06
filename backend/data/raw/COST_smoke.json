@@ -1,0 +1,56 @@
+{
+  "ticker": "COST",
+  "ts": "2026-09-06T06:33:56.150817+00:00",
+  "n_questions": 5,
+  "n_crashed": 0,
+  "retrieval_hits": 2,
+  "retrieval_hit_rate": 0.4,
+  "total_claims": 12,
+  "unsupported_claims": 0,
+  "unsupported_rate": 0.0,
+  "passed": true,
+  "questions": [
+    {
+      "question": "What was the total amount Costco spent on additions to property and equipment in 2025?",
+      "source_chunk": "COST_10K_2025_0103",
+      "retrieval_hit": false,
+      "hit_type": "none",
+      "n_claims": 0,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What types of RSU awards were outstanding at the end of 2025, and what distinguishes them from each other?",
+      "source_chunk": "COST_10K_2025_0140",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 6,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What was identified as a critical audit matter for Costco's 2025 financial statements?",
+      "source_chunk": "COST_10K_2025_0095",
+      "retrieval_hit": false,
+      "hit_type": "none",
+      "n_claims": 0,
+      "n_unsupported": 0
+    },
+    {
+      "question": "Where can investors find Costco's SEC filings and other investor relations materials?",
+      "source_chunk": "COST_10K_2025_0017",
+      "retrieval_hit": false,
+      "hit_type": "none",
+      "n_claims": 0,
+      "n_unsupported": 0
+    },
+    {
+      "question": "Who is responsible for maintaining effective internal control over financial reporting at Costco?",
+      "source_chunk": "COST_10K_2025_0097",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 6,
+      "n_unsupported": 0
+    }
+  ],
+  "numeric_ok": true,
+  "numeric_notes": []
+}

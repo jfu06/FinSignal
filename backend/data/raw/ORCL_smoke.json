@@ -1,0 +1,56 @@
+{
+  "ticker": "ORCL",
+  "ts": "2026-09-06T06:44:10.866854+00:00",
+  "n_questions": 5,
+  "n_crashed": 0,
+  "retrieval_hits": 4,
+  "retrieval_hit_rate": 0.8,
+  "total_claims": 23,
+  "unsupported_claims": 0,
+  "unsupported_rate": 0.0,
+  "passed": true,
+  "questions": [
+    {
+      "question": "What cybersecurity frameworks and monitoring approaches does Oracle use to detect and respond to security threats?",
+      "source_chunk": "ORCL_10K_2026_0135",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 6,
+      "n_unsupported": 0
+    },
+    {
+      "question": "As of May 31, 2026, what was the status of Oracle's internal control over financial reporting?",
+      "source_chunk": "ORCL_10K_2026_0205",
+      "retrieval_hit": false,
+      "hit_type": "none",
+      "n_claims": 0,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What specific business areas could be impacted by Oracle's need to comply with changing ESG laws?",
+      "source_chunk": "ORCL_10K_2026_0114",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 6,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What methods does Oracle use to mitigate credit risk associated with trade receivables?",
+      "source_chunk": "ORCL_10K_2026_0252",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 5,
+      "n_unsupported": 0
+    },
+    {
+      "question": "Which countries or tax authorities have significant ongoing tax matters or litigation with Oracle?",
+      "source_chunk": "ORCL_10K_2026_0319",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 6,
+      "n_unsupported": 0
+    }
+  ],
+  "numeric_ok": true,
+  "numeric_notes": []
+}

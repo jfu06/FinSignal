@@ -389,11 +389,27 @@ def get_metric(ticker: str, metric: str, fy: int | None = None,
         period = _fy_period(cik, fy, settings, accn=accn) if fy else None
         anchor_end = period[1] if period else None
 
-    for taxonomy, tag in spec["tags"]:  # §5.1 priority fallback, per request
+    # §5.1 tag migration, both directions: for a SPECIFIC year, the first
+    # tag carrying that year wins (priority fallback). For LATEST, priority
+    # order alone is wrong — NVDA moved revenue from RevenueFromContract…
+    # (data ends FY2022) to Revenues (current) and the old-tag hit shipped a
+    # four-year-old figure as "latest". Latest = newest period across ALL
+    # tags; priority only breaks ties.
+    best: tuple | None = None
+    for taxonomy, tag in spec["tags"]:
         facts = _fetch(cik, taxonomy, tag, spec["unit"], settings, accn=accn)
         point = (pick_annual(facts, fy) if spec["kind"] == "duration"
                  else pick_instant(facts, anchor_end, fy))
-        if point is not None:
+        if point is None:
+            continue
+        if fy is not None:
+            best = (point, taxonomy, tag)
+            break
+        if best is None or point.end > best[0].end:
+            best = (point, taxonomy, tag)
+    if best is not None:
+        point, taxonomy, tag = best
+        if True:
             return MetricPoint(
                 ticker=ticker, metric=metric, fy=fy_label(point),
                 value=point.val, unit=spec["unit"],

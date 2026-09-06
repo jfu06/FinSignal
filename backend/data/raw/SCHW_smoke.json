@@ -1,0 +1,56 @@
+{
+  "ticker": "SCHW",
+  "ts": "2026-09-06T06:45:55.535470+00:00",
+  "n_questions": 5,
+  "n_crashed": 0,
+  "retrieval_hits": 3,
+  "retrieval_hit_rate": 0.6,
+  "total_claims": 17,
+  "unsupported_claims": 0,
+  "unsupported_rate": 0.0,
+  "passed": true,
+  "questions": [
+    {
+      "question": "What are the different forms of equity compensation available to non-employee directors under Schwab's deferred compensation plans?",
+      "source_chunk": "SCHW_10K_2026_0410",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 5,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What types of client activities expose Schwab to credit risk from potential defaults?",
+      "source_chunk": "SCHW_10K_2026_0072",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 6,
+      "n_unsupported": 0
+    },
+    {
+      "question": "How many shares of common stock were outstanding as of January 30, 2026?",
+      "source_chunk": "SCHW_10K_2026_0003",
+      "retrieval_hit": false,
+      "hit_type": "none",
+      "n_claims": 0,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What were Schwab's total net revenues for fiscal year 2025?",
+      "source_chunk": "SCHW_10K_2026_0111",
+      "retrieval_hit": false,
+      "hit_type": "none",
+      "n_claims": 0,
+      "n_unsupported": 0
+    },
+    {
+      "question": "What types of benefits and programs does Schwab offer to support employee financial wellness and career development?",
+      "source_chunk": "SCHW_10K_2026_0046",
+      "retrieval_hit": true,
+      "hit_type": "exact",
+      "n_claims": 6,
+      "n_unsupported": 0
+    }
+  ],
+  "numeric_ok": true,
+  "numeric_notes": []
+}

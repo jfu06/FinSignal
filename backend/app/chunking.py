@@ -38,7 +38,28 @@ class RawChunk:
     text: str
 
 
-def detect_section(paragraph: str) -> str | None:
+# Standard 10-K section names some filers (Intel) print WITHOUT the
+# "Item N." prefix — the body uses bare headings / running page headers.
+# Exact whole-line matches only; used by the second chunking pass when the
+# Item-prefix pass leaves the document essentially unlabeled.
+_BARE_HEADINGS = {
+    "business": "Item 1. Business",
+    "risk factors": "Item 1A. Risk Factors",
+    "unresolved staff comments": "Item 1B. Unresolved Staff Comments",
+    "properties": "Item 2. Properties",
+    "legal proceedings": "Item 3. Legal Proceedings",
+    "management's discussion and analysis of financial condition and "
+    "results of operations":
+        "Item 7. Management's Discussion and Analysis",
+    "quantitative and qualitative disclosures about market risk":
+        "Item 7A. Quantitative and Qualitative Disclosures About Market Risk",
+    "financial statements and supplementary data":
+        "Item 8. Financial Statements and Supplementary Data",
+    "controls and procedures": "Item 9A. Controls and Procedures",
+}
+
+
+def detect_section(paragraph: str, bare_headings: bool = False) -> str | None:
     """Return a normalized section label if the paragraph is an Item heading."""
 
     # Headings are short; a 3-page paragraph starting with "Item 1..." is body.
@@ -47,6 +68,9 @@ def detect_section(paragraph: str) -> str | None:
         return None
     m = _ITEM_RE.match(first_line)
     if not m:
+        if bare_headings:
+            key = first_line.strip().rstrip(".:").lower().replace("’", "'")
+            return _BARE_HEADINGS.get(key)
         return None
     number = m.group(1).upper()
     title = m.group(2).strip().rstrip(".")
@@ -69,8 +93,26 @@ def split_paragraphs(text: str) -> list[str]:
 
 
 def chunk_text(text: str) -> list[RawChunk]:
-    """Chunk one filing's plain text into section-tagged chunks."""
+    """Chunk one filing's plain text into section-tagged chunks.
 
+    Two passes: the Item-prefix pass first. If it leaves the document
+    essentially unlabeled (Intel prints bare headings, no "Item 1A."
+    prefixes in the body), rechunk recognizing known bare section names.
+    The second pass only ever runs on documents the first pass failed,
+    so normally-formatted filings keep byte-identical chunk boundaries.
+    """
+
+    chunks = _chunk_text_pass(text, bare_headings=False)
+    labeled = sum(1 for c in chunks if c.section)
+    if chunks and labeled / len(chunks) < 0.3:
+        rechunked = _chunk_text_pass(text, bare_headings=True)
+        relabeled = sum(1 for c in rechunked if c.section)
+        if relabeled > labeled:
+            return rechunked
+    return chunks
+
+
+def _chunk_text_pass(text: str, bare_headings: bool) -> list[RawChunk]:
     chunks: list[RawChunk] = []
     section: str | None = None
     buf: list[str] = []
@@ -87,7 +129,7 @@ def chunk_text(text: str) -> list[RawChunk]:
     for para in split_paragraphs(text):
         if is_noise(para):
             continue
-        new_section = detect_section(para)
+        new_section = detect_section(para, bare_headings=bare_headings)
         if new_section:
             flush()
             section = new_section

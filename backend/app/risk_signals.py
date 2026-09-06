@@ -35,6 +35,9 @@ _REALIZED_PATTERNS = [
     r"ha(?:s|ve) (?:in the past )?(?:suffered|incurred)",
     r"has and could",
     r"were adversely affected",
+    r"ha(?:s|ve) lost",
+    r"ha(?:s|ve) (?:so far )?failed",
+    r"ha(?:s|ve) declined",
 ]
 _REALIZED_RE = re.compile("|".join(f"({p})" for p in _REALIZED_PATTERNS),
                           re.IGNORECASE)
