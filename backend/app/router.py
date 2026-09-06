@@ -91,6 +91,9 @@ You route questions for a financial filings QA system.
   capital-intensive?", "did they pay dividends?"), asks WHY, or needs a
   multi-step custom formula the ops can't finish (emit the component values;
   the text answer completes the computation and states the conclusion).
+  ATTRIBUTION questions ("what drove revenue growth?", "why did margins
+  change?") are ALWAYS hybrid: emit op=yoy for the metric so the change is
+  computed from official data, and the text explains the drivers.
 
 Available metrics: {", ".join(sorted(METRICS))}
 Available ratios (use op="ratio"): {", ".join(sorted(RATIOS))}

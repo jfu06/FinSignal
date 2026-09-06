@@ -301,7 +301,7 @@ def render_report(report: dict, key: str) -> None:
 
     if report["summary"] and not (report.get("numeric")
                                   and not report["claims"]):
-        st.markdown(report["summary"])
+        st.markdown(report["summary"].replace("$", "\\$"))
     if report.get("coverage_note"):
         st.caption(
             f"ℹ️ {report['coverage_note']} Signal badges — 🔢 quantified / "
@@ -375,7 +375,7 @@ def render_claim(c: dict) -> None:
         meta += f" · 🔁 echoed in {', '.join(sig['echoes'])}"
     span = c.get("span_overlap") or {}
     if span.get("flagged"):
-        meta += " · ⚑ figures not found verbatim in citations — review advised"
+        meta += " · 🔢⚠️ figures don't match the cited text"
     elif span.get("number_match") == 1.0:
         meta += " · 🔢 figures match citations"
     cls = "fs-claim warn" if c["unverified"] else "fs-claim"
@@ -527,12 +527,19 @@ def answer_with_progress(question: str, tk: str) -> dict:
     return report
 
 
+_REL_TIME_RE = __import__("re").compile(
+    r"last year|latest|most recent|past year|去年|最近|上一?年", flags=2)
+
 # --- replay the conversation ---
 for i, turn in enumerate(history):
     with st.chat_message("user"):
         st.markdown(f"**[{turn['ticker']}]** {turn['question']}")
         if turn.get("standalone") and turn["standalone"] != turn["question"]:
             st.caption(f"Interpreted as: {turn['standalone']}")
+        elif _REL_TIME_RE.search(turn["question"]):
+            # "last year" is genuinely ambiguous near fiscal-year boundaries —
+            # always say which document answered it
+            st.caption("Interpreted as: answered from the latest filed 10-K")
     with st.chat_message("assistant"):
         if turn.get("error"):
             st.error(turn["error"])

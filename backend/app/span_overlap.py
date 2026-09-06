@@ -6,11 +6,13 @@ aggregated by the eval harness. Two signals with different language behavior
 (claims are often Chinese while the 10-K evidence is English):
 
 1. ``number_match`` — language-independent. Every numeric figure in the claim
-   (3+ digits) should appear in the cited evidence. Numbers are compared as
-   bare digit sequences, which makes cross-format matches work:
-   ``4,161.61亿`` -> ``416161`` matches evidence ``$416,161 (million)``.
-   A claim quoting figures its own citations don't contain is a red flag the
-   judge might have missed.
+   (3+ digits) should appear in the cited evidence. Comparison is VALUE-based
+   with unit normalization: scale words are applied (billion/million/亿/万),
+   a x1000 scale ladder bridges unit conventions (evidence tables print
+   "416,161" in millions where a claim says "$416.2 billion"), and a 0.2%
+   relative tolerance absorbs honest display rounding. Pure digit-string
+   matching flagged correctly-converted figures as "not found" — a false
+   alarm that undermined every real flag.
 2. ``token_overlap`` — English content-word overlap between claim and
    evidence (ROUGE-1-precision-like). Only meaningful when the claim actually
    contains enough English content words; otherwise reported as ``None``
@@ -59,20 +61,64 @@ def _en_tokens(text: str) -> set[str]:
     }
 
 
+_SCALE_WORDS = {
+    "trillion": 1e12, "billion": 1e9, "bn": 1e9, "million": 1e6, "mn": 1e6,
+    "thousand": 1e3,
+    "万亿": 1e12, "十亿": 1e9, "亿": 1e8, "百万": 1e6, "万": 1e4,
+}
+_VALUE_RE = re.compile(
+    r"(\d[\d,]*(?:\.\d+)?)\s*"
+    r"(trillion|billion|bn|million|mn|thousand|万亿|十亿|亿|百万|万)?",
+    re.IGNORECASE,
+)
+# Bridges unit conventions between claim and evidence (a table printed in
+# millions vs a claim written in billions differ by x1000 steps).
+_SCALE_LADDER = (1e-9, 1e-6, 1e-3, 1.0, 1e3, 1e6, 1e9)
+_REL_TOLERANCE = 0.002  # 0.2%: display rounding ($416.2B vs 416,161M), no more
+
+
+def _values(text: str) -> list[float]:
+    """Numeric values in the text, scale words applied, small numbers skipped."""
+
+    out: list[float] = []
+    for num, scale in _VALUE_RE.findall(text):
+        digits = re.sub(r"\D", "", num)
+        if len(digits) < MIN_DIGITS:
+            continue  # "52 weeks", "10%" — parity with the old behavior
+        value = float(num.replace(",", ""))
+        if (not scale and "," not in num and "." not in num
+                and 1900 <= value <= 2100):
+            continue  # a year ("fiscal 2025"), not a financial figure
+        if scale:
+            value *= _SCALE_WORDS[scale.lower()]
+        out.append(value)
+    return out
+
+
+def _value_found(claim_value: float, evidence_values: list[float]) -> bool:
+    for ev in evidence_values:
+        if ev == 0:
+            continue
+        for k in _SCALE_LADDER:
+            if abs(claim_value * k - ev) / abs(ev) < _REL_TOLERANCE:
+                return True
+    return False
+
+
 def number_match(claim_text: str, evidence_text: str) -> float | None:
     """Fraction of the claim's numbers found in the evidence (None if no numbers).
 
-    Evidence digits are matched by substring containment so a claim-side
-    rounding of a longer figure ("416,161" quoted as "416,000") does NOT
-    count, but identical digit sequences embedded in wider evidence text do.
+    Value-based with unit normalization — "$416.2 billion" matches an
+    evidence table's "416,161" (millions); a fabricated figure still fails.
     """
 
-    claim_numbers = _digit_sequences(claim_text)
-    if not claim_numbers:
+    claim_values = _values(claim_text)
+    if not claim_values:
         return None
-    evidence_numbers = _digit_sequences(evidence_text)
-    matched = sum(1 for n in claim_numbers if n in evidence_numbers)
-    return matched / len(claim_numbers)
+    evidence_values = _values(evidence_text)
+    matched = sum(1 for v in claim_values
+                  if _value_found(v, evidence_values))
+    return matched / len(claim_values)
 
 
 def token_overlap(claim_text: str, evidence_text: str) -> float | None:

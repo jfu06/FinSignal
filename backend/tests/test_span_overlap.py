@@ -73,3 +73,26 @@ class TestCheckClaim:
             [EVIDENCE, "Research and development expense was $31,370 million."],
         )
         assert result["number_match"] == 1.0
+
+
+class TestUnitNormalization:
+    """The reviewer's false-positive: correctly-converted figures were
+    flagged 'not found verbatim' because matching was digit-string based."""
+
+    EV = ("Total net sales 416,161 391,035 $383,285  "
+          "Services (1) 109,158 96,169 85,200")
+
+    def test_billions_claim_matches_millions_table(self):
+        claim = ("Apple's total net sales rose to $416.2 billion in fiscal "
+                 "2025 from $391.0 billion in fiscal 2024.")
+        assert number_match(claim, self.EV) == 1.0
+
+    def test_years_are_not_financial_figures(self):
+        # "fiscal 2025" must not count as an unmatched number
+        assert number_match("Sales grew in fiscal 2025.", self.EV) is None
+
+    def test_fabricated_billions_still_fail(self):
+        assert number_match("Net sales were $420 billion.", self.EV) == 0.0
+
+    def test_chinese_scale_words(self):
+        assert number_match("总净销售额为4,161.61亿美元。", self.EV) == 1.0
