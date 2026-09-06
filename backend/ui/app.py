@@ -169,14 +169,14 @@ with st.sidebar:
         if smoke and smoke.get("passed"):
             st.caption(
                 f"🩺✅ Automated smoke check passed: evidence hit rate "
-                f"{smoke['retrieval_hit_rate']:.0%}, unsupported rate "
+                f"{smoke['retrieval_hit_rate']:.0%}, unverified rate "
                 f"{smoke['unsupported_rate']:.0%}. (Not yet covered by the "
                 f"human-labeled eval set.)"
             )
         elif smoke:
             st.warning(
                 f"🩺 Smoke check FAILED (evidence hit rate "
-                f"{smoke['retrieval_hit_rate']:.0%}, unsupported rate "
+                f"{smoke['retrieval_hit_rate']:.0%}, unverified rate "
                 f"{smoke['unsupported_rate']:.0%}, crashed questions "
                 f"{smoke['n_crashed']}). Treat answers for this company "
                 f"with caution."
@@ -328,8 +328,9 @@ def render_report(report: dict, key: str) -> None:
     if report["claims"]:
         st.caption(
             f"{len(report['claims'])} claims · {len(ok_claims)} verified · "
-            f"{len(warn_claims)} unverified · unsupported rate "
-            f"{report['unsupported_rate']:.0%} · {report.get('latency_s', 0):.0f}s"
+            f"{len(warn_claims)} unverified"
+            + (f" ({report['unsupported_rate']:.0%})" if warn_claims else "")
+            + f" · {report.get('latency_s', 0):.0f}s"
         )
 
     for c in ok_claims:
