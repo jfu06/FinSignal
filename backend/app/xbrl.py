@@ -327,6 +327,11 @@ def ingest_facts(
         conn.commit()
     seed_metric_map(settings)
     store_filing_docs(cik, settings, progress=progress)
+    try:  # fresh facts must be visible immediately, not after the TTL
+        from .metrics import _FACTS_CACHE
+        _FACTS_CACHE.clear()
+    except Exception:  # noqa: BLE001
+        pass
 
     result = {"ticker": ticker, "cik": cik, "company": entry["title"],
               "facts": len(rows)}

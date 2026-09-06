@@ -102,6 +102,7 @@ class PipelineState(TypedDict, total=False):
     refusal: str                   # out_of_scope reply, asker's language
     coverage: bool                 # enumeration ask -> diversified retrieval
     route_degraded: bool           # numeric route fell back to narrative
+    generation_failed: bool        # structured output failed twice (system)
     numeric_future: Any            # hybrid: metric queries running in parallel
     needs_onboarding: str          # ticker mentioned but not in the corpus
     numeric_queries: list[dict]
@@ -365,6 +366,9 @@ def build_graph(settings: Settings):
             settings=settings, feedback=state.get("feedback"),
             figures=figures,
         )
+        from .generation import GENERATION_FAILED_MSG
+        if summary == GENERATION_FAILED_MSG:
+            update["generation_failed"] = True
         update.update({"summary": summary, "claims": claims})
         return update
 
@@ -406,6 +410,8 @@ def build_graph(settings: Settings):
         report["retrieved_chunk_ids"] = [c.chunk_id for c in state["chunks"]]
         if state.get("route_degraded"):
             report["route_degraded"] = True
+        if state.get("generation_failed"):
+            report["generation_failed"] = True
         if state.get("coverage"):
             report["coverage_note"] = COVERAGE_NOTE
             # Materiality signals (quantified / realized / echoed) — see

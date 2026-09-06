@@ -415,6 +415,8 @@ def render_report(report: dict, key: str) -> None:
         )
     ok_claims = [c for c in report["claims"] if not c["unverified"]]
     warn_claims = [c for c in report["claims"] if c["unverified"]]
+    if not report["claims"] and report.get("latency_s"):
+        st.caption(f"{report['latency_s']:.0f}s")
     if report["claims"]:
         n = len(report["claims"])
         st.caption(
@@ -750,12 +752,12 @@ for i, turn in enumerate(history):
 # (the standard diligence workflow: fixed questions, rotating tickers).
 _CATEGORIES = [
     ("num", "🔢 Figures — computed",
-     "official XBRL data, ~3 s",
+     "official XBRL data",
      ["What was last fiscal year's revenue, and how fast did it grow?",
       "What is the 3-year trend in gross margin?",
       "How much cash was spent on share buybacks?"]),
     ("doc", "📄 From the filing — verified",
-     "every claim cited & checked, ~40 s",
+     "every claim cited & checked",
      ["What are the biggest risk factors?",
       "What drove revenue growth last year?",
       "How does management describe the competitive landscape?"]),

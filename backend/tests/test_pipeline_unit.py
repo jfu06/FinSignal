@@ -134,7 +134,9 @@ class TestGenerateAnswer:
         summary, claims = generation.generate_answer(
             "q1", "question", [make_chunk()], settings=make_settings(tmp_path))
         assert claims == []
-        assert "could not produce a verifiable structured answer" in summary
+        # a SYSTEM fault stated as one — no semantic diagnosis (round 15)
+        assert "technical error" in summary and "system fault" in summary
+        assert "judgment" not in summary and "debt" not in summary
 
     def test_regeneration_feedback_included_in_prompt(self, tmp_path):
         FakeAnthropic.queue = [tool_response({"summary": "s", "claims": []})]

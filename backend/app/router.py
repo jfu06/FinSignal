@@ -51,10 +51,10 @@ _ROUTE_TOOL = {
             "refusal": {
                 "type": "string",
                 "description": (
-                    "ONLY for out_of_scope: 1-2 sentences in the asker's "
-                    "language — this system answers questions about the "
-                    "company's SEC filings — plus ONE relevant example "
-                    "question for the current ticker."
+                    "ONLY for out_of_scope: 1-2 English sentences — this "
+                    "system answers questions about the company's SEC "
+                    "filings — plus ONE relevant example question for the "
+                    "current ticker. Always English."
                 ),
             },
             "queries": {
@@ -143,6 +143,7 @@ When the question compares companies ("A vs B", "who spends more"), you MUST
 use op="compare" with tickers listing EVERY company mentioned.\
 
 
+Keep "reason" under 8 words.
 ALWAYS fill "companies" with the tickers of every company the question
 mentions (any language); leave it empty when no company is named.
 
@@ -235,6 +236,23 @@ def _fmt(value: float, unit: str) -> str:
     return f"{value:,.4g}"
 
 
+# Registry keys are code identifiers, not copy — "rnd_intensity" must
+# never surface as "rnd intensity" (review round 14).
+_DISPLAY_NAMES = {
+    "rnd_intensity": "R&D intensity",
+    "research_and_development": "R&D expense",
+    "sga_expense": "SG&A expense",
+    "da_margin": "D&A margin",
+    "depreciation_amortization": "depreciation & amortization",
+    "ppe_net": "PP&E, net",
+    "eps_basic": "EPS (basic)",
+    "eps_diluted": "EPS (diluted)",
+    "capex": "capital expenditures",
+    "capex_intensity": "capex intensity",
+    "operating_cash_flow": "operating cash flow",
+}
+
+
 def _metric_label(metric: str, tag: str = "") -> str:
     """Card label for a metric — prefer the filing's own line-item name.
 
@@ -245,7 +263,7 @@ def _metric_label(metric: str, tag: str = "") -> str:
 
     if metric == "revenue" and tag.endswith(":Revenues"):
         return "total net revenues"
-    return metric.replace("_", " ")
+    return _DISPLAY_NAMES.get(metric, metric.replace("_", " "))
 
 
 def _series_text(ticker: str, metric: str, pts_asc: list) -> str:  # noqa: ANN001
@@ -552,12 +570,23 @@ def execute_numeric(
     """Run all structured queries; failed ones are dropped (fail-open)."""
 
     settings = settings or get_settings()
-    results = []
-    for q in queries[:6]:  # sanity cap
+
+    def _safe(q: dict) -> dict:
         try:
-            r = _run_one(q, default_ticker, settings, scope=scope)
+            return _run_one(q, default_ticker, settings, scope=scope)
         except Exception:  # noqa: BLE001 — one bad query must not kill the rest
-            r = {"ok": False}
+            return {"ok": False}
+
+    capped = queries[:6]  # sanity cap
+    if len(capped) > 1:
+        # metric queries are independent Neon lookups — run them together
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=len(capped)) as pool:
+            outs = list(pool.map(_safe, capped))
+    else:
+        outs = [_safe(q) for q in capped]
+    results = []
+    for q, r in zip(capped, outs):
         if r.get("ok"):
             r["query"] = q
             results.append(r)

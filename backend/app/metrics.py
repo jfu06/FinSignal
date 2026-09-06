@@ -294,9 +294,22 @@ _ANNUAL_FORMS = ("10-K", "10-K/A")
 _REPORT_FORMS = ("10-K", "10-K/A", "10-Q", "10-Q/A")  # Q4 derivation only
 
 
+# Short-lived facts cache: a 3-year margin trend used to issue 6+
+# identical Neon round trips (per year x per tag); facts only change at
+# ingest, so a 10-minute TTL is safe and cuts trend queries to 2 fetches.
+_FACTS_CACHE: dict[tuple, tuple[float, list]] = {}
+_FACTS_TTL_S = 600.0
+
+
 def _fetch(cik: int, taxonomy: str, tag: str, unit: str,
            settings: Settings, accn: str | None = None,
            forms: tuple = _ANNUAL_FORMS) -> list[Fact]:
+    import time as _time
+
+    cache_key = (cik, taxonomy, tag, unit, accn, forms)
+    hit = _FACTS_CACHE.get(cache_key)
+    if hit is not None and _time.monotonic() - hit[0] < _FACTS_TTL_S:
+        return hit[1]
     with connect(settings) as conn, conn.cursor() as cur:
         if accn is not None:
             # Oracle-document mode: only figures AS PRINTED in that one filing
@@ -326,8 +339,12 @@ def _fetch(cik: int, taxonomy: str, tag: str, unit: str,
                 """,
                 (cik, taxonomy, tag, unit, list(forms)),
             )
-        return [Fact(r[0], r[1], float(r[2]), r[3], r[4] or "", r[5])
-                for r in cur.fetchall()]
+        facts = [Fact(r[0], r[1], float(r[2]), r[3], r[4] or "", r[5])
+                 for r in cur.fetchall()]
+    if len(_FACTS_CACHE) > 4096:
+        _FACTS_CACHE.clear()
+    _FACTS_CACHE[cache_key] = (_time.monotonic(), facts)
+    return facts
 
 
 def _fy_period(cik: int, fy: int, settings: Settings,

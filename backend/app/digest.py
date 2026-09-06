@@ -89,16 +89,29 @@ def generate_digest(
     sections: dict[str, dict] = {}
 
     def run_section(key: str, title: str, question: str) -> tuple[str, dict]:
+        import time as _time
+
+        t0 = _time.time()
         try:
             report = answer_question(
                 question, ticker, settings=settings,
                 query_id=f"digest_{ticker.lower()}_{key}",
             )
+            if report.get("generation_failed"):
+                # The four digest sections are KNOWN-answerable (round 15:
+                # a transient structured-output failure once emptied a
+                # whole section) — a technical failure here earns exactly
+                # one retry before we show the failure notice.
+                report = answer_question(
+                    question, ticker, settings=settings,
+                    query_id=f"digest_{ticker.lower()}_{key}_r",
+                )
+            report.setdefault("latency_s", _time.time() - t0)
             return key, {"key": key, "title": title, "question": question,
-                         "report": report}
+                         "latency_s": _time.time() - t0, "report": report}
         except Exception as exc:  # noqa: BLE001 — one section ≠ whole digest
             return key, {"key": key, "title": title, "question": question,
-                         "error": str(exc)}
+                         "latency_s": _time.time() - t0, "error": str(exc)}
 
     if parallel:
         progress(f"Running {len(DIGEST_SECTIONS)} sections in parallel…")
