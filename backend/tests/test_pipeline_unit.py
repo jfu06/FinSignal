@@ -411,3 +411,53 @@ class TestMMR:
         ]
         picked = [r[0] for r in _mmr(rows, k=2)]
         assert picked == ["c0", "c2"]  # duplicate skipped for the new topic
+
+
+class TestRiskSignals:
+    def _claim(self, text, cites=("c1",)):
+        c = Claim(claim_id="q1_claim1", query_id="q1", text=text,
+                  cited_chunk_ids=list(cites))
+        c.kind = "risk"  # set dynamically by generation, not a dataclass field
+        return c
+
+    def test_realized_language_detected(self, monkeypatch, tmp_path):
+        from app import risk_signals
+        import app.retrieval as retrieval
+        monkeypatch.setattr(retrieval, "retrieve",
+                            lambda *a, **k: [])
+        s = risk_signals.claim_signals(
+            self._claim("pandemics hurt Apple"),
+            ["Major public health issues have adversely affected the "
+             "Company due to their impact on demand."],
+            ["Item 1A. Risk Factors"], "AAPL",
+            settings=make_settings(tmp_path))
+        assert s["realized"].lower() == "have adversely affected"
+
+    def test_quantified_detected(self, monkeypatch, tmp_path):
+        from app import risk_signals
+        import app.retrieval as retrieval
+        monkeypatch.setattr(retrieval, "retrieve", lambda *a, **k: [])
+        s = risk_signals.claim_signals(
+            self._claim("DMA fine"),
+            ["the Commission imposed a fine of €500 million, up to 10% of "
+             "worldwide net sales"],
+            ["Item 3. Legal Proceedings"], "AAPL",
+            settings=make_settings(tmp_path))
+        assert s["quantified"] is True
+
+    def test_echoes_count_other_sections_only(self, monkeypatch, tmp_path):
+        from app import risk_signals
+        import app.retrieval as retrieval
+        from app.models import Chunk
+        hits = [Chunk(chunk_id="x1", doc_id="d", ticker="AAPL",
+                      text="t", section="Item 1A. Risk Factors"),
+                Chunk(chunk_id="x2", doc_id="d", ticker="AAPL",
+                      text="t", section="Item 7. MD&A")]
+        monkeypatch.setattr(retrieval, "retrieve", lambda *a, **k: hits)
+        s = risk_signals.claim_signals(
+            self._claim("supply chain concentration"),
+            ["plain hypothetical text with no numbers"],
+            ["Item 1A. Risk Factors"], "AAPL",
+            settings=make_settings(tmp_path))
+        assert s["echoes"] == ["Item 7. MD&A"]
+        assert "quantified" not in s and "realized" not in s

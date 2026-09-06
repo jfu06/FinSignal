@@ -303,7 +303,12 @@ def render_report(report: dict, key: str) -> None:
                                   and not report["claims"]):
         st.markdown(report["summary"])
     if report.get("coverage_note"):
-        st.caption(f"ℹ️ {report['coverage_note']}")
+        st.caption(
+            f"ℹ️ {report['coverage_note']} Signal badges — 🔢 quantified / "
+            f"⚡ realized / 🔁 echoed elsewhere in the filing — are "
+            f"document facts you can verify in the cited text; ranking is "
+            f"yours to make."
+        )
     ok_claims = [c for c in report["claims"] if not c["unverified"]]
     warn_claims = [c for c in report["claims"] if c["unverified"]]
     if report["claims"]:
@@ -361,6 +366,13 @@ def render_claim(c: dict) -> None:
     kind_badge = "🚩 Risk" if c["kind"] == "risk" else "💡 Insight"
     verified_badge = "⚠️ Unverified" if c["unverified"] else "✅ Verified"
     meta = f"{kind_badge} · {verified_badge}"
+    sig = c.get("signals") or {}
+    if sig.get("quantified"):
+        meta += " · 🔢 quantified in evidence"
+    if sig.get("realized"):
+        meta += f" · ⚡ realized — “{sig['realized']}”"
+    if sig.get("echoes"):
+        meta += f" · 🔁 echoed in {', '.join(sig['echoes'])}"
     span = c.get("span_overlap") or {}
     if span.get("flagged"):
         meta += " · ⚑ figures not found verbatim in citations — review advised"

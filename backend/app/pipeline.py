@@ -42,6 +42,7 @@ from .logging_utils import log_event
 from .models import Chunk, Claim, Verdict
 from .edgar import EdgarError, resolve_ticker
 from .refinement import RefinementTrace, retrieve_refined
+from .risk_signals import annotate_risk_claims
 from .router import execute_numeric, route_question
 from .verification import verify_claims_batch
 
@@ -315,6 +316,17 @@ def build_graph(settings: Settings):
         report["retrieved_chunk_ids"] = [c.chunk_id for c in state["chunks"]]
         if state.get("coverage"):
             report["coverage_note"] = COVERAGE_NOTE
+            # Materiality signals (quantified / realized / echoed) — see
+            # app.risk_signals. Deterministic document facts, no ranking.
+            try:
+                annotate_risk_claims(
+                    report, state["claims"],
+                    {c.chunk_id: c for c in state["chunks"]},
+                    state["ticker"], settings=settings,
+                    doc_id=state.get("doc_id") or None,
+                )
+            except Exception:  # noqa: BLE001 — decoration, never critical
+                pass
         if state.get("numeric_results"):  # hybrid: verified figures alongside
             report["numeric"] = state["numeric_results"]
         trace = state["refinement"]
