@@ -66,7 +66,7 @@ class TestEnsureTicker:
             "status": "added", "ticker": "NVDA", "company": "NVIDIA Corp",
             "filing_date": "2026-02-26", "chunks": 300, "facts": 27281,
         }
-        assert len(steps) == 5  # resolve, locate, download, ingest, xbrl
+        assert len(steps) == 4  # resolve, locate, download, ingest∥xbrl
 
     def test_xbrl_failure_does_not_block_onboarding(self, monkeypatch, tmp_path):
         monkeypatch.setattr(onboarding, "known_tickers", lambda s: set())

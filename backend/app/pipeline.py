@@ -322,11 +322,27 @@ def build_graph(settings: Settings):
     def generate(state: PipelineState) -> PipelineState:
         # Second pass gets an "r" suffix so both attempts stay on record.
         gen_id = state["query_id"] + ("r" if state.get("regenerated") else "")
+        update: PipelineState = {}
+        numeric = state.get("numeric_results")
+        if state.get("numeric_future") is not None:
+            # hybrid: the metric queries ran concurrently with retrieval —
+            # join here so the text layer KNOWS what the figure panel shows
+            # (it once wrote "the specific dollar amount is not included"
+            # right under an official $34.55B card)
+            try:
+                numeric = state["numeric_future"].result(timeout=30)
+                update["numeric_results"] = numeric
+                update["numeric_future"] = None
+            except Exception:  # noqa: BLE001 — figures are additive
+                numeric = None
+        figures = "\n".join(r["text"] for r in numeric) if numeric else None
         summary, claims = generate_answer(
             gen_id, state["question"], state["chunks"],
             settings=settings, feedback=state.get("feedback"),
+            figures=figures,
         )
-        return {"summary": summary, "claims": claims}
+        update.update({"summary": summary, "claims": claims})
+        return update
 
     def verify(state: PipelineState) -> PipelineState:
         # ONE batch judge call per attempt; verdicts persisted immediately.
@@ -356,7 +372,9 @@ def build_graph(settings: Settings):
             state["summary"], state["claims"], state["chunks"],
         )
         _xbrl_rescue_flags(report, state["ticker"], settings)
-        if state.get("numeric_future") is not None:
+        if state.get("numeric_results"):
+            report["numeric"] = state["numeric_results"]
+        elif state.get("numeric_future") is not None:
             try:
                 report["numeric"] = state["numeric_future"].result(timeout=30)
             except Exception:  # noqa: BLE001 — figures are additive in hybrid

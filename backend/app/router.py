@@ -94,6 +94,10 @@ You route questions for a financial filings QA system.
   ATTRIBUTION questions ("what drove revenue growth?", "why did margins
   change?") are ALWAYS hybrid: emit op=yoy for the metric so the change is
   computed from official data, and the text explains the drivers.
+  For "how much X, and why/where is it going" questions, emit the FULL
+  figure panel: op=yoy for the metric AND its intensity/margin ratio when
+  one exists (R&D -> rnd_intensity, capex -> capex_intensity) — level,
+  growth, and share of revenue together tell the money story.
 
 Available metrics: {", ".join(sorted(METRICS))}
 Available ratios (use op="ratio"): {", ".join(sorted(RATIOS))}

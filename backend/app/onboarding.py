@@ -78,22 +78,25 @@ def ensure_ticker(
     progress(f"Downloading 10-K (filed {meta['filing_date']})…")
     path = download_10k(ticker, entry["cik"])
 
-    progress("Chunking + embedding locally + writing to Neon…")
-    num_chunks = ingest_file(path, settings)
+    # Numeric line: the company's official XBRL figures are independent of
+    # the document line — fetch them CONCURRENTLY with chunk+embed instead
+    # of serially after it (the two together were most of the wait).
+    # Fail-soft: the document line is the core product; a facts hiccup must
+    # not block onboarding (numeric questions then fall back to RAG).
+    from concurrent.futures import ThreadPoolExecutor
 
-    # Numeric line: pull the company's official XBRL figures too, so the
-    # metrics router can answer "how much" questions immediately. Fail-soft:
-    # the document line is the core product; a facts hiccup must not block
-    # onboarding (numeric questions then fall back to RAG by design).
-    progress("Fetching official XBRL figures (companyfacts)…")
-    num_facts = 0
-    try:
-        from .xbrl import ingest_facts
+    from .xbrl import ingest_facts
 
-        num_facts = ingest_facts(ticker, settings=settings)["facts"]
-    except Exception:  # noqa: BLE001
-        progress("XBRL figures unavailable for this company — "
-                 "numeric questions will fall back to filing text.")
+    progress("Chunking + embedding + official XBRL figures (in parallel)…")
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        facts_future = pool.submit(ingest_facts, ticker, settings=settings)
+        num_chunks = ingest_file(path, settings)
+        num_facts = 0
+        try:
+            num_facts = facts_future.result(timeout=120)["facts"]
+        except Exception:  # noqa: BLE001
+            progress("XBRL figures unavailable for this company — "
+                     "numeric questions will fall back to filing text.")
 
     log_event(
         "ticker_onboarded", settings.log_path,

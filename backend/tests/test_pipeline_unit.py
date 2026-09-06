@@ -186,7 +186,7 @@ def wired(monkeypatch, tmp_path):
     monkeypatch.setattr(pipeline, "_persist_claims",
                         lambda claims, s: state["persisted"].append(list(claims)))
 
-    def fake_generate(query_id, question, chunks, settings, feedback=None):
+    def fake_generate(query_id, question, chunks, settings, feedback=None, figures=None):
         state["generate_calls"] += 1
         claim = Claim(claim_id=f"{query_id}_claim1", query_id=query_id,
                       text="t", cited_chunk_ids=["c1"])
@@ -495,3 +495,29 @@ class TestRiskFlagsGate:
             "q", "question?", "AAPL", "summary", [ok, warn],
             [make_chunk()])
         assert report["risk_flags"] == ["verified risk"]
+
+
+class TestBoilerplateFlags:
+    def test_batched_flags_parsed(self, tmp_path):
+        from app.boilerplate import boilerplate_flags
+        FakeAnthropic.queue = [tool_response({"items": [
+            {"id": 0, "boilerplate": True},
+            {"id": 1, "boilerplate": False},
+        ]})]
+        flags = boilerplate_flags(
+            ["success depends on innovation",
+             "R&D was $34.55B, 8.3% of revenue"],
+            settings=make_settings(tmp_path))
+        assert flags == [True, False]
+        assert len(FakeAnthropic.calls) == 1  # one batch, not per-claim
+
+    def test_fail_open_returns_all_false(self, tmp_path):
+        from app.boilerplate import boilerplate_flags
+        FakeAnthropic.queue = []  # fake raises when queue is empty
+        flags = boilerplate_flags(["a", "b"], settings=make_settings(tmp_path))
+        assert flags == [False, False]
+
+    def test_empty_input_no_call(self, tmp_path):
+        from app.boilerplate import boilerplate_flags
+        assert boilerplate_flags([], settings=make_settings(tmp_path)) == []
+        assert FakeAnthropic.calls == []

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import sys
+import os
 from collections import Counter
 from pathlib import Path
 
@@ -25,6 +26,12 @@ from app.logging_utils import log_event
 from app.pipeline import answer_question
 
 GOLDEN_SET = Path(__file__).resolve().parent / "golden_set.json"
+
+
+# Second-axis gate: fraction of displayed claims that are generic filing
+# language ("success depends on innovation") rather than company-specific
+# answers. Provisional threshold — calibrate after the first baselines.
+BOILERPLATE_GATE = float(os.getenv("BOILERPLATE_GATE", "0.25"))
 
 
 def load_cases() -> list[dict]:
@@ -143,6 +150,7 @@ def evaluate_case(case: dict, settings) -> dict:  # noqa: ANN001
         "verdicts": verdicts, "n_claims": sum(verdicts.values()),
         "retrieval_hit": retrieval_hit, "snippet_hit": snippet_hit,
         "span_flagged": span_flagged, "number_scores": number_scores,
+        "claim_texts": [c["text"] for c in report["claims"]],
         "failures": failures,
     }
 
@@ -223,6 +231,21 @@ def main() -> int:
           f"({unsupported}/{total_claims} claims; gate at "
           f"{settings.unsupported_rate_threshold:.0%})")
 
+    # ---- second axis: informativeness (faithful boilerplate scores a
+    # perfect 0% unsupported while answering nothing) ----
+    from app.boilerplate import boilerplate_flags
+    labeled = [(r["case_id"], text) for r in narrative
+               for text in r.get("claim_texts", [])]
+    bp_flags = boilerplate_flags([text for _, text in labeled],
+                                 settings=settings)
+    bp_rate = (sum(bp_flags) / len(bp_flags)) if bp_flags else 0.0
+    print(f"BOILERPLATE RATE: {bp_rate:.2%}  "
+          f"({sum(bp_flags)}/{len(bp_flags)} claims generic; gate at "
+          f"{BOILERPLATE_GATE:.0%})")
+    for (case_id, text), flag in zip(labeled, bp_flags):
+        if flag:
+            print(f"  ▢ {case_id}: {text[:100]}")
+
     failures = [f for r in narrative for f in r.get("failures", [])]
     if failures:
         print("\nFailure examples:")
@@ -244,6 +267,7 @@ def main() -> int:
         "eval_summary", settings.log_path,
         num_cases=len(cases), total_claims=total_claims,
         verdicts=dict(total_verdicts), unsupported_rate=rate,
+        boilerplate_rate=bp_rate,
         retrieval_hits=hits, boundary_failures=len(boundary_failed),
         crashed=len(crashed),
         span_flagged=len(all_flagged),
@@ -261,6 +285,10 @@ def main() -> int:
         return 1
     if crashed:
         print("\n❌ GATE FAILED: eval could not run end-to-end.")
+        return 1
+    if bp_flags and bp_rate > BOILERPLATE_GATE:
+        print(f"\n❌ GATE FAILED: boilerplate rate {bp_rate:.2%} > "
+              f"{BOILERPLATE_GATE:.0%} — verified but uninformative answers.")
         return 1
     print("\n✅ GATE PASSED.")
     return 0

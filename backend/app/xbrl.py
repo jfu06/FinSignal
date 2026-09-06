@@ -297,7 +297,12 @@ def ingest_facts(
         f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
     ))
 
-    rows = dedupe_rows(parse_companyfacts(data))
+    # Registry-filtered: the metrics layer can only ever query the tags in
+    # METRICS, and a large filer's FULL history is 50k+ rows — most of the
+    # onboarding minute was that executemany over the WAN. Same filter the
+    # benchmark ingester uses; adding registry tags later just needs a
+    # re-ingest (idempotent).
+    rows = dedupe_rows(parse_companyfacts(data, wanted=registry_tags()))
     progress(f"Storing {len(rows):,} facts…")
     with connect(settings) as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM xbrl_facts WHERE cik = %s", (cik,))

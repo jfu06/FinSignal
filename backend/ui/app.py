@@ -571,18 +571,16 @@ def answer_with_progress(question: str, tk: str) -> dict:
     return report
 
 
-_REL_TIME_RE = __import__("re").compile(
-    r"last year|latest|most recent|past year|去年|最近|上一?年", flags=2)
-
 # --- replay the conversation ---
 for i, turn in enumerate(history):
     with st.chat_message("user"):
         st.markdown(f"**[{turn['ticker']}]** {turn['question']}")
         if turn.get("standalone") and turn["standalone"] != turn["question"]:
             st.caption(f"Interpreted as: {turn['standalone']}")
-        elif _REL_TIME_RE.search(turn["question"]):
-            # "last year" is genuinely ambiguous near fiscal-year boundaries —
-            # always say which document answered it
+        elif not turn.get("digest"):
+            # which document answered is always worth a line — "last year"
+            # near a fiscal-year boundary is genuinely ambiguous, and even
+            # timeless questions are scoped to one filing
             st.caption("Interpreted as: answered from the latest filed 10-K")
     with st.chat_message("assistant"):
         if turn.get("error"):

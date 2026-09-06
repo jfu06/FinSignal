@@ -78,11 +78,16 @@ same language as the user's question.
 levels: pair each driver with the filing's stated REASON (use the MD&A's own \
 explanation) and, when the chunks contain the figures, quantify each \
 driver's year-over-year CHANGE and its SHARE of the total change (e.g. \
-"Services added \$13.0B — about half the \$25.1B total increase"). The \
+"Services added $13.0B — about half the $25.1B total increase"). The \
 fastest-growing line is often NOT the largest contributor — say so when \
 true. Cover every dimension the evidence breaks down (product lines AND \
 regions). Stay on the asked metric — operating expenses are not a revenue \
 driver.
+- Skip BOILERPLATE: a claim that would hold with the company's name \
+swapped for any other ("success depends on innovation", "markets are \
+competitive") earns its place only if the question asks for it. Prefer \
+facts specific to THIS company's filing — figures, named products, stated \
+reasons.
 - 3 to 6 claims, each ONE concise sentence (latency matters: no claim longer \
 than ~40 words). This is factual analysis, NOT investment advice: never \
 recommend buying, selling, or holding.\
@@ -105,12 +110,15 @@ def generate_answer(
     chunks: list[Chunk],
     settings: Settings | None = None,
     feedback: str | None = None,
+    figures: str | None = None,
 ) -> tuple[str, list[Claim]]:
     """Return (summary, claims) grounded in the retrieved chunks.
 
     ``feedback`` is used by the one-shot regeneration path: when a previous
     attempt produced CONTRADICTED claims, the judge's reasons are passed back
-    so the model can correct itself.
+    so the model can correct itself. ``figures`` carries the numeric layer's
+    already-computed official values (hybrid route) so the text NEVER claims
+    a figure is unavailable while it sits right beside the answer.
     """
 
     settings = settings or get_settings()
@@ -121,6 +129,14 @@ def generate_answer(
         f"{_format_chunks(chunks)}\n\n"
         f"Question: {question}"
     )
+    if figures:
+        user_msg += (
+            "\n\nOfficial figures ALREADY COMPUTED from SEC XBRL data and "
+            "displayed beside your answer:\n" + figures +
+            "\nDo NOT say these figures are unavailable, and do not emit "
+            "them as claims (they are already shown, sourced, and verified) "
+            "— your job is the explanation and context around them."
+        )
     if feedback:
         user_msg += (
             "\n\nA previous answer contained claims that CONTRADICTED the "
