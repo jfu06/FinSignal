@@ -40,6 +40,29 @@ When neither line can answer honestly — a judgment question, a metric that
 doesn't exist for the company, a transient failure — the system says exactly
 that, with the facts it does have. An unverifiable answer never renders.
 
+### Why the numeric line has no judge (and no regeneration)
+
+Judge + regenerate is a correction loop for a *stochastic* producer. The
+narrative line needs one because an LLM writes it. The numeric line's
+producer is deterministic code — re-running it yields the same answer, so
+"regenerate" is meaningless, and putting an LLM judge over code arithmetic
+would reintroduce exactly the failure mode the channel exists to eliminate.
+Its quality mechanisms are deterministic and sit *before* a card renders:
+
+| Narrative line | Numeric line's counterpart |
+|---|---|
+| Per-claim judge verdicts | Pre-render guards: annual-forms filter, tag-migration-aware latest, as-of anchor, ratio sanity bounds, CAGR applicability |
+| contradicted → regenerate once → block | Fail-open: anything uncomputable or suspect emits **no card**; the question falls back to the RAG line (which has the judge) |
+| Verified per request | Verified in the eval layer: 6 pinned numeric gate cases (exact values + accessions) and per-company numeric health probes |
+
+The two lanes touch in hybrid answers: computed figures are injected into
+generation as context (never re-emitted as claims — they already carry
+official provenance), while any number the *prose* states is checked
+deterministically against the cited text and official XBRL facts. One
+sentence: the narrative line can't trust its producer, so it runs a court;
+the numeric line replaced the producer, so it needs guardrails and an
+annual inspection instead.
+
 ### Credibility mapping
 
 | Judge verdict     | Status  | Behavior                                                       |
