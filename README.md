@@ -1,54 +1,173 @@
-# FinSignal — Phase 1 (RAG line)
+# FinSignal — SEC Filings Q&A You Can Check
 
-A verifiable, citation-grounded Q&A assistant over a **fixed local set of 10-K
-filings**. A retail investor asks a natural-language question about a ticker and
-gets back a plain-language answer, per-claim source citations, and a per-claim
-credibility label — with unsupported claims flagged and contradicted claims
-blocked.
+Ask any US public company's 10-K, in any language. **Every number is computed
+from official SEC XBRL data by deterministic code — never written by an LLM —
+and carries a digit-for-digit provenance link. Every written claim is
+independently verified against the filing** by a cross-vendor judge, with
+click-through citations; contradicted claims are structurally unable to reach
+the screen.
 
-This repo implements **only the narrative/RAG line** described in
-[`docs/design-doc.md`](docs/design-doc.md). See Section 0 of that doc for the
-authoritative scope table.
+Live demo: Streamlit Cloud · Chrome side-panel extension (Web Store, in
+review) · [Lessons learned](LESSONS.md) from building this with an
+eval-first loop.
 
-### Out of scope this phase (do not build)
+```
+                  ┌──────────────────────────────────────────────┐
+                  │        CLIENTS                               │
+                  │  Streamlit UI (cloud) · Chrome side panel    │
+                  │  checklist Q&A · digest · ?ticker= deep link │
+                  └──────────────────────┬───────────────────────┘
+                                         │ question
+                                         ▼
+                  ┌──────────────────────────────────────────────┐
+                  │  USAGE GUARDRAILS                            │
+                  │  10 q / person / day (hashed IP)             │
+                  │  global 50 / day spend backstop              │
+                  └──────────────────────┬───────────────────────┘
+                                         ▼
+┌────────────────┐  unknown  ┌──────────────────────────────────────────────┐
+│  ONBOARDING    │◄──────────│  ROUTER  (Haiku, one fast call)              │
+│  ~16 s, ∥      │  ticker   │   ├─ detect companies (any language)         │
+│  SEC EDGAR →   │           │   ├─ route + metric queries                  │
+│  10-K text +   │──────────►│   ├─ fully_answers contract (no silent       │
+│  XBRL facts +  │  ingest   │   │  metric substitution)                    │
+│  health check  │           │   └─ guards: FY-label ≠ future ·             │
+└────────────────┘           │      financial q never refused               │
+                             └──────┬─────────┬─────────┬─────────┬────────┘
+                                    ▼         ▼         ▼         ▼
+                              out_of_scope  RAG LINE  NUMERIC   hybrid
+                              (~3 s, $0.003)           LINE     = both, ∥
 
-Numeric/XBRL metrics layer · question routing (numeric vs. narrative) ·
-document upload · CI wiring of the eval gate · a trained NLI model ·
-monitoring dashboards · multi-market support.
 
-> Numeric / aggregation questions are **not** answered by RAG — the pipeline
-> returns an explicit "not yet supported" data-boundary reply (routing is
-> Phase 2).
+  RAG LINE  (text questions)              NUMERIC LINE  (figure questions)
+
+┌───────────────────────────────┐       ┌───────────────────────────────┐
+│ 1. Retrieve                   │       │ 1. Metric registry (contract) │
+│    local e5 → pgvector top-6  │       │    28 metrics · 7 ratios ·    │
+│    coverage? → 2× k + MMR     │       │    derived formulas           │
+└───────────────┬───────────────┘       │    not listed → RAG line      │
+                ▼                       └───────────────┬───────────────┘
+┌───────────────────────────────┐ ◄─┐                   ▼
+│ 2. Enough? (Haiku)            │   │   ┌───────────────────────────────┐
+│    REWRITE / EXPAND → retry   ├───┘   │ 2. Fact selection (SQL,       │
+└───────────────┬───────────────┘ ≤3    │    no LLM)  xbrl_facts:       │
+                │ ENOUGH/GIVE_UP  rounds│    10-K/10-Q only — proxies   │
+                ▼                       │    never vote · latest across │
+┌───────────────────────────────┐       │    migrated tags · TTL cache  │
+│ 3. Generate (Sonnet)          │◄──────┤───────────────┬───────────────┘
+│    summary + claims[], every  │figures│               ▼
+│    claim cites chunk ids ·    │(hybrid│ ┌───────────────────────────────┐
+│    boilerplate filter         │ join) │ │ 3. Compute (pure Python)      │
+└───────────────┬───────────────┘       │ │    YoY · CAGR · trends with   │
+                ▼                       │ │    halted/resumed · as-of     │
+┌───────────────────────────────┐ once  │ │    anchor · sanity bounds ·   │
+│ 4. Batch verify (gpt-5-mini,  ├──┐    │ │    subsumption dedup          │
+│    cross-vendor) ONE call     │  │    │ └───────────────┬───────────────┘
+└───────────────┬───────────────┘  │    │                 ▼
+                │ CONTRADICTED ────┘    │ ┌───────────────────────────────┐
+                │ → regenerate once,    │ │ 4. Render (templates)         │
+                │   else block ⛔       │ │    "$23.92B, +22.0% YoY"      │
+                ▼                       │ │    tag = raw value ·          │
+┌───────────────────────────────┐       │ │    iXBRL + statement links    │
+│ 5. Code re-checks the judge   │       │ └───────────────┬───────────────┘
+│    unit-normalized digits vs  │       │                 │
+│    citations · claim-internal │       │  nothing computable? FAIL-OPEN
+│    arithmetic · XBRL rescue   │       │  (fall back to RAG — answer
+└───────────────┬───────────────┘       │   honestly from filing text,
+                ▼                       │   never invent a number)
+┌───────────────────────────────┐       │
+│ 6. Assemble report            │◄──────┘
+│    ✅ verified · ⚠ unverified │
+│    (gated) · ⛔ blocked ·     │
+│    risk signals ⚡🔢🔁        │
+└───────────────────────────────┘
+
+
+──────────────────────  DATA LAYER  (Neon Postgres)  ──────────────────────
+
+┌──────────────────────┐ ┌──────────────────────┐ ┌──────────────────────┐
+│ chunks (pgvector)    │ │ xbrl_facts           │ │ filing_docs ·        │
+│ section-tagged,      │ │ SEC companyfacts,    │ │ stmt_pages · claims  │
+│ 2-pass (bare-heading │ │ registry-filtered ·  │ │ every verdict        │
+│ fallback) · corpus   │ │ dedup AFTER forms    │ │ persisted →          │
+│ 'live'|'benchmark'   │ │ filter               │ │ auditable            │
+└──────────────────────┘ └──────────────────────┘ └──────────────────────┘
+
+─────────────────────────  EVALUATION STACK  ──────────────────────────────
+
+┌──────────────┐ ┌──────────────────┐ ┌──────────────────┐ ┌──────────────┐
+│ 295 unit     │ │ RELEASE GATE     │ │ health checks    │ │ FinanceBench │
+│ tests — every│ │ 36 golden cases: │ │ auto per ticker: │ │ external,    │
+│ incident     │ │ ≤4% unsupported ·│ │ self-supervised  │ │ 112 expert Q │
+│ becomes a    │ │ numerics 6/6 ·   │ │ QA + numeric     │ │ → 70.5%      │
+│ regression   │ │ ≤25% boilerplate │ │ probes (caught a │ │ (score, not  │
+│ test         │ │ — BLOCKS SHIPPING│ │ real 8× bug)     │ │ a gate)      │
+└──────────────┘ └──────────────────┘ └──────────────────┘ └──────────────┘
+
+Observability: jsonl event log (every LLM call, prompt + raw output, keyed
+               by query_id) → live progress UI · usage accounting ·
+               cross-vendor judging (Claude writes, GPT judges)
+```
 
 ---
 
-## Pipeline
+## Why trust is architectural here
 
-```
-local 10-K files
-  → chunk (paragraph/section, XBRL-noise filtered)
-  → embed once, store text + embedding in Neon (pgvector)
-  → [query] top-k cosine retrieval  (single pgvector SQL query)
-      ↺ bounded agentic refinement: an LLM assessor judges sufficiency and
-        picks ENOUGH / REWRITE query / EXPAND k / GIVE_UP (≤3 rounds, k≤24,
-        every decision logged; invalid output fails safe to one-shot behavior)
-  → LLM answer as structured JSON (claims + cited_chunk_ids)
-  → ONE batch verification call (LLM-as-judge over ALL claims at once)
-  → assemble report + credibility mapping + unsupported rate
-  → structured jsonl logging at every step
-```
+Three separations, each enforced in code rather than promised in a prompt:
 
-### Credibility mapping (from `docs/requirements.md`)
+1. **Numbers ≠ language.** A figure is never generated: it is selected from
+   official XBRL facts (annual reports only — proxy statements never vote)
+   and computed by tested Python. The provenance line under every card
+   prints the exact concept and full-precision value
+   (`us-gaap:Revenues = 23,921,000,000`) with links to the SEC iXBRL viewer
+   and the rendered statement page — the reader matches the digits.
+2. **Writer ≠ judge.** Claims are verified by a *different vendor's* model
+   (Claude writes, GPT judges), then re-checked by deterministic code
+   (unit-normalized figure matching, claim-internal arithmetic, XBRL
+   rescue). A contradicted claim is blocked before render.
+3. **Shipping ≠ hoping.** The release gate (below) blocks any change that
+   regresses faithfulness, numeric correctness, or informativeness. It has
+   blocked real regressions; that is its job.
 
-| Judge verdict     | Status  | Behavior                                                        |
+When neither line can answer honestly — a judgment question, a metric that
+doesn't exist for the company, a transient failure — the system says exactly
+that, with the facts it does have. An unverifiable answer never renders.
+
+### Credibility mapping
+
+| Judge verdict     | Status  | Behavior                                                       |
 |-------------------|---------|----------------------------------------------------------------|
 | `SUPPORTED`       | OK      | Shown normally with a clickable citation                       |
-| `NOT_ENOUGH_INFO` | WARNING | Shown but marked **unverified**; added to the unsupported list |
-| `CONTRADICTED`    | ERROR   | **Blocked** (not shown); logged and triggers one regeneration  |
+| `NOT_ENOUGH_INFO` | WARNING | Shown but marked **unverified**, behind an acknowledgment gate |
+| `CONTRADICTED`    | ERROR   | **Blocked** (never shown); triggers one regeneration           |
 
-The **unsupported rate** = `(NOT_ENOUGH_INFO + CONTRADICTED) / total claims`.
-The eval script is a release gate: it **exits non-zero when the unsupported
-rate exceeds 4%** (`UNSUPPORTED_RATE_THRESHOLD`).
+---
+
+## Evaluation
+
+**Release gate** — `python -m eval.run_eval` exits non-zero (do not ship) on
+any of: unsupported rate > 4%, any of the 6 pinned numeric answers wrong,
+boilerplate rate > 25% (question-aware informativeness judge), a crashed
+case. The golden set has **36 cases: 25 narrative (with retrieval anchors) ·
+6 numeric (exact values + accessions pinned) · 5 numeric-boundary**.
+
+**External benchmark** —
+[FinanceBench](https://arxiv.org/abs/2311.11944) 10-K subset: 112
+expert-annotated questions over 64 historical 10-Ks from 31 companies, run in
+oracle-document mode with `corpus='benchmark'` isolation (benchmark filings
+can never leak into live retrieval). Graded against expert answers by a
+cross-vendor LLM grader: **70.5% correct**, with honest abstentions counted
+separately from hallucinations. A capability score that feeds the roadmap —
+deliberately *not* part of the gate.
+
+**Per-company health checks** — every onboarded ticker automatically gets a
+self-supervised QA smoke eval plus deterministic numeric probes (facts
+resolvable, same-year margins plausible in both scale-pollution directions,
+latest annual not stale). The probes caught a real stale-tag bug that shipped
+a four-year-old "latest revenue" — on their first run.
+
+**295 unit tests.** Every production incident becomes a permanent regression
+test.
 
 ---
 
@@ -57,32 +176,39 @@ rate exceeds 4%** (`UNSUPPORTED_RATE_THRESHOLD`).
 ```
 backend/
   app/
-    config.py         # env/.env config (DATABASE_URL, keys, models, thresholds)
-    logging_utils.py  # log_event(): one jsonl line per step (design-doc §6)
-    models.py         # Chunk / Claim / TestCase + Verdict→Status mapping (§7)
+    config.py         # env-driven config (models, thresholds, guardrails)
+    logging_utils.py  # log_event(): one jsonl line per step
+    models.py         # Chunk / Claim / TestCase + Verdict→Status mapping
     db.py             # Neon connection (pgvector) + schema init
-    schema.sql        # DDL: chunks(+vector) / claims / test_cases
+    schema.sql        # DDL: chunks / claims / xbrl_facts / filing_docs / …
     embeddings.py     # local e5 embeddings (query:/passage: prefixes)
+    chunking.py       # section-tagged 2-pass chunking (bare-heading fallback)
     ingest.py         # chunk + embed + store
-    retrieval.py      # single pgvector top-k query
+    retrieval.py      # pgvector top-k + MMR diversification (coverage mode)
     refinement.py     # bounded agentic retrieval-refinement loop
-    schemas.py        # Pydantic models for every LLM tool output (lenient
-                      #   salvage validators for observed malformed shapes)
-    generation.py     # structured JSON claim generation (forced tool call)
-    verification.py   # ONE batch judge call per report
+    router.py         # route + numeric query planning/execution + guards
+    xbrl.py           # metric registry + SEC companyfacts ingestion
+    metrics.py        # fact selection (forms filter, tag migration, cache),
+                      #   ratios, derived formulas, provenance links
+    schemas.py        # Pydantic models with lenient salvage validators
+    generation.py     # structured claims (attribution shape, refusal shape)
+    verification.py   # ONE cross-vendor batch judge call per report
+    span_overlap.py   # unit-normalized figure match · arithmetic self-check
+    risk_signals.py   # materiality badges: quantified / realized / echoed
+    boilerplate.py    # question-aware informativeness judge (eval axis)
     assembler.py      # report + credibility mapping
-    pipeline.py       # LangGraph StateGraph orchestration (regen loop = conditional edge)
-    edgar.py          # SEC EDGAR client (any US ticker via official mapping)
-    onboarding.py     # on-demand ticker onboarding (download → ingest → ready)
-    smoke_eval.py     # self-supervised smoke eval for onboarded tickers
-                      #   (synthetic QA from sampled chunks — no human labels)
-  ui/app.py           # Streamlit demo UI (citations, WARNING ack, export,
-                      #   add-any-company via EDGAR)
-  eval/               # golden set + release-gate script
-  tests/              # unit tests
-  data/raw/           # downloaded 10-K files (not committed)
-  requirements.txt
-  .env.example
+    pipeline.py       # LangGraph StateGraph orchestration
+    digest.py         # one-click annual report digest (4 parallel sections)
+    edgar.py          # SEC EDGAR client (any US ticker)
+    onboarding.py     # on-demand onboarding (~16 s, ingest ∥ facts)
+    smoke_eval.py     # per-company health check (QA smoke + numeric probes)
+    usage.py          # per-visitor + global budget accounting
+  ui/app.py           # Streamlit demo UI — intentionally monolithic (~950
+                      #   lines): a single-file demo surface, not the product
+                      #   architecture; all logic lives in app/
+  eval/               # golden set · release gate · FinanceBench harness
+  tests/              # 295 unit tests
+  data/raw/           # 10-K text (not committed) + health-check results
 docs/                 # design-doc, requirements, decisions, data-dictionary
 ```
 
@@ -103,113 +229,26 @@ pip install -r requirements.txt
 
 ```bash
 cp .env.example .env
-# edit .env: set DATABASE_URL, ANTHROPIC_API_KEY
+# edit .env: set DATABASE_URL, ANTHROPIC_API_KEY (and OPENAI_API_KEY for the judge)
 ```
 
-`.env` is git-ignored. `DATABASE_URL` is read from the environment; the LLM
-key is read from `.env`. **No secret is ever hard-coded or committed.**
+`.env` is git-ignored; no secret is ever hard-coded or committed.
 
-- **LLM (generation + batch judge):** Anthropic Claude (`LLM_MODEL`).
-- **Embeddings:** run **locally** via sentence-transformers
-  (`intfloat/multilingual-e5-small`, 384-dim) — no API key needed; this is the
-  local-model option from design-doc §4. **Multilingual matters**: questions
-  may be Chinese while the 10-K corpus is English (see the sample question in
-  requirements.md). e5 requires **both-side prefixes** (`"query: "` /
-  `"passage: "`); `app/embeddings.py` applies them automatically.
-
-> `EMBEDDING_DIM` in `.env` must match the embedding model **and** the
-> `vector(N)` column in `schema.sql`. Default: `multilingual-e5-small` → 384.
-> Changing the embedding model requires re-running `python -m app.ingest`.
+- **Generation:** Anthropic Claude · **Judge:** OpenAI (cross-vendor by design)
+- **Embeddings:** local sentence-transformers
+  (`intfloat/multilingual-e5-small`, 384-dim, both-side prefixes applied
+  automatically) — multilingual, so questions may be in any language while
+  the corpus is English. Answers are always English.
 
 ### 3. Provision Neon (pgvector)
 
-Create a free Postgres database at [neon.tech](https://neon.tech), enable
-pgvector, and create the tables. You can apply the schema in one command:
+Create a free Postgres database at [neon.tech](https://neon.tech), then:
 
 ```bash
-python -m app.db          # runs backend/app/schema.sql against DATABASE_URL
+python -m app.db          # applies backend/app/schema.sql against DATABASE_URL
 ```
 
-…or paste the SQL below into the Neon SQL editor:
-
-```sql
-CREATE EXTENSION IF NOT EXISTS vector;
-
--- 1) Narrative corpus + embeddings.
-CREATE TABLE IF NOT EXISTS chunks (
-    chunk_id   TEXT PRIMARY KEY,          -- e.g. "AAPL_10K_0001"
-    doc_id     TEXT NOT NULL,             -- e.g. "AAPL_10K_2023"
-    ticker     TEXT NOT NULL,             -- e.g. "AAPL"
-    section    TEXT,                       -- filing section/heading, may be NULL
-    text       TEXT NOT NULL,
-    embedding  vector(384) NOT NULL,       -- must match EMBEDDING_DIM
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS chunks_ticker_idx ON chunks (ticker);
-CREATE INDEX IF NOT EXISTS chunks_embedding_cosine_idx
-    ON chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
-
--- 2) Generated claims + judge verdicts.
-CREATE TABLE IF NOT EXISTS claims (
-    claim_id        TEXT PRIMARY KEY,
-    query_id        TEXT NOT NULL,
-    text            TEXT NOT NULL,
-    cited_chunk_ids TEXT[] NOT NULL DEFAULT '{}',
-    verdict         TEXT,                  -- SUPPORTED | NOT_ENOUGH_INFO | CONTRADICTED
-    judge_reason    TEXT,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT claims_verdict_chk
-        CHECK (verdict IS NULL OR verdict IN
-               ('SUPPORTED', 'NOT_ENOUGH_INFO', 'CONTRADICTED'))
-);
-CREATE INDEX IF NOT EXISTS claims_query_id_idx ON claims (query_id);
-
--- 3) Mini golden set for the eval / release gate.
-CREATE TABLE IF NOT EXISTS test_cases (
-    case_id                 TEXT PRIMARY KEY,
-    ticker                  TEXT NOT NULL,
-    question                TEXT NOT NULL,
-    expected_answer_snippet TEXT,
-    expected_chunk_id       TEXT
-);
-```
-
-The canonical DDL lives in [`backend/app/schema.sql`](backend/app/schema.sql);
-the block above is a copy for convenience.
-
----
-
-## Deploying publicly
-
-All config is env-driven — set `DATABASE_URL` and `ANTHROPIC_API_KEY` as
-platform secrets, no code changes. Two supported paths:
-
-- **Streamlit Community Cloud** (free): connect the GitHub repo, main file
-  `backend/ui/app.py`, Python 3.11 (`runtime.txt`), paste secrets in the app
-  settings. Root `requirements.txt` pulls in `backend/requirements.txt` with
-  CPU torch wheels.
-- **Any container host** (HF Spaces PRO / Railway / Fly / Render): the root
-  `Dockerfile` serves the UI on port 7860.
-
-**Before exposing to the internet, activate the cost guardrails** (inactive by
-default for local dev):
-
-| Env var | Effect |
-|---|---|
-| `ACCESS_CODE` | Non-empty → UI requires this code before use |
-| `SESSION_QUERY_LIMIT` | Max questions per browser session (default 10) |
-| `DAILY_QUERY_BUDGET` | Max questions per UTC day across all users (default 50) |
-| `MAX_TICKERS` | Corpus cap for on-demand onboarding, enforced server-side (0 = unlimited, the default) |
-
-Also recommended: set a monthly spend limit on the Anthropic key in their
-console (hard backstop), and rotate any credentials before going live.
-
-## Tests
-
-```bash
-cd backend
-pytest
-```
+The canonical DDL lives in [`backend/app/schema.sql`](backend/app/schema.sql).
 
 ---
 
@@ -218,52 +257,53 @@ pytest
 ```bash
 cd backend && source .venv/bin/activate
 
-# one-time setup
-python -m app.db                        # apply schema to Neon
-python -m scripts.download_filings      # fetch AAPL/MSFT/TSLA 10-Ks from EDGAR
-python -m app.ingest                    # chunk + embed + store (766 chunks)
+python -m app.db                        # one-time: apply schema
+python -m scripts.download_filings      # fetch seed 10-Ks from EDGAR
+python -m app.ingest                    # chunk + embed + store
 
-# ask a question (add a path as 3rd arg to export the report as JSON)
-python -m app.pipeline "苹果最近一年的营收增长主要靠什么驱动？" AAPL report.json
+# ask a question (any language; answers are English)
+python -m app.pipeline "What was Apple's FY2025 revenue and how fast is it growing?" AAPL
 
-# web UI (click-through citations, WARNING acknowledgment, JSON export)
+# web UI
 streamlit run ui/app.py
 
-# release-gate evaluation (exits non-zero if unsupported rate > 4%)
+# release gate (exits non-zero on any threshold breach — do not ship)
 python -m eval.run_eval
 
-# FinanceBench external benchmark (capability score — separate from the gate)
-python -m eval.ingest_benchmark      # one-time: fetch + ingest 64 historical 10-Ks
-python -m eval.verify_benchmark_docs # sanity: each doc contains its expert evidence
-python -m eval.run_benchmark         # 112 expert-annotated questions, graded report
+# FinanceBench external benchmark
+python -m eval.ingest_benchmark          # one-time: fetch 64 historical 10-Ks
+python -m eval.ingest_benchmark_facts    # registry-filtered XBRL backfill
+python -m eval.run_benchmark             # 112 questions, graded report
 ```
 
-### FinanceBench external benchmark
+---
 
-[FinanceBench](https://arxiv.org/abs/2311.11944) (Islam et al., 2023) is an
-expert-annotated open QA benchmark over real SEC filings. FinSignal runs its
-open-source 10-K subset — 112 questions across 64 historical 10-Ks from 31
-companies — in *oracle-document mode*: retrieval pinned to the exact filing
-each question was written against. Benchmark filings are ingested with
-`corpus='benchmark'` so they can never leak into live product retrieval.
-Answers are graded against the expert answers by a cross-vendor LLM grader
-as **correct / incorrect / abstain** (abstain = the system honestly said the
-document excerpts don't show the figure — a capability gap, not a
-hallucination). The score is reported in `eval/benchmark_report.json` and
-feeds the capability roadmap; it is intentionally NOT part of the release
-gate.
+## Deploying publicly
 
-## Implementation status
+All config is env-driven — set `DATABASE_URL` and the API keys as platform
+secrets. Streamlit Community Cloud: main file `backend/ui/app.py`, Python
+3.11. Cost guardrails:
 
-- [x] **Step 1** — project skeleton, `.env.example`, README + Neon schema SQL
-- [x] **Step 2** — corpus download + ingestion/chunking + local embeddings
-- [x] **Step 3** — retrieval (single pgvector top-k query, cross-lingual e5)
-- [x] **Step 4** — answer generation (forced-tool structured JSON claims)
-- [x] **Step 5** — batch verification (ONE judge call) + credibility assembly
-      + one-shot regeneration on CONTRADICTED
-- [x] **Step 6** — golden set (30 cases) + eval release gate
-      (latest run: 0.00% unsupported rate, 25/25 retrieval hits — GATE PASSED)
-- [x] **Post-MVP** — bounded agentic retrieval-refinement loop · LangGraph
-      StateGraph port · span-overlap second signal (number-match + token
-      overlap) · full LLM-call tracing (prompt + raw output per call, keyed
-      by query_id)
+| Env var | Effect |
+|---|---|
+| `ACCESS_CODE` | Non-empty → UI requires this code |
+| `VISITOR_DAILY_LIMIT` | Questions per person per UTC day, hashed-IP (default 10) |
+| `DAILY_QUERY_BUDGET` | Global questions per UTC day — spend backstop (default 50) |
+| `MAX_TICKERS` | Corpus cap for on-demand onboarding (0 = unlimited) |
+
+Also set a monthly spend limit on the LLM keys (hard backstop). Note for
+Streamlit Cloud: changes under `backend/app/` require an app **Reboot** —
+hot reload only re-runs the UI script, and stale module caches have shipped
+real incidents.
+
+## Tests
+
+```bash
+cd backend && pytest        # 295 tests
+```
+
+## Lessons learned
+
+Building this with an AI pair, eval-first, surfaced a set of failure modes
+worth reading before trusting any LLM system with numbers:
+**[LESSONS.md](LESSONS.md)**.
