@@ -7,8 +7,9 @@ independently verified against the filing** by a cross-vendor judge, with
 click-through citations; contradicted claims are structurally unable to reach
 the screen.
 
-Live demo: Streamlit Cloud · Chrome side-panel extension (Web Store, in
-review) · [Lessons learned](LESSONS.md) from building this with an
+**[Live demo](https://jfu06-finsignal-backenduiapp-lbq2kk.streamlit.app/)** ·
+**[Chrome extension](https://chromewebstore.google.com/detail/finsignal-%E2%80%94-sec-filings-q/mmddjhihmkgjingnkaneofhhkbepcbih)**
+(Web Store) · [Lessons learned](LESSONS.md) from building this with an
 eval-first loop.
 
 ![FinSignal architecture — two answer channels, one eval gate](docs/architecture.png)
