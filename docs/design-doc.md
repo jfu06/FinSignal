@@ -7,8 +7,7 @@
 > onboarding, per-company health checks, and a hardened multi-axis release
 > gate. This document is kept as the original one-day plan for the
 > narrative/RAG line; the **current architecture lives in the
-> [README](../README.md)** (diagram + trust model) and the running decision
-> log in [decisions.md](decisions.md).
+> [README](../README.md)** (diagram + trust model).
 
 ## 0. Relationship to decisions.md
 
