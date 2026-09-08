@@ -49,7 +49,10 @@ A user picks a ticker or uploads a document, and the AI generates an instant ana
 - Ticker: AAPL
 - Document Type: 10-K
 - Market Region: US
-- User Question: "苹果最近一年的营收增长主要靠什么驱动？有没有风险因素？"
+- User Question: "What mainly drove Apple's revenue growth over the last
+  year, and are there any risk factors?" (questions may arrive in any
+  language — e.g. the same question in Chinese — while the corpus is
+  English; answers are always English)
 
 ## Clarified & Structured Requirements
 
