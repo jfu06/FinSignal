@@ -1,4 +1,14 @@
-# FinSignal — Design Doc 
+# FinSignal — Design Doc
+
+> **Status (2026-09-06): historical — Phase 1 implementation plan.**
+> Everything marked "Deferred to Phase 2" below has since been **built and
+> shipped**: the numeric/XBRL metrics layer, question routing
+> (narrative / numeric / hybrid / out-of-scope), on-demand company
+> onboarding, per-company health checks, and a hardened multi-axis release
+> gate. This document is kept as the original one-day plan for the
+> narrative/RAG line; the **current architecture lives in the
+> [README](../README.md)** (diagram + trust model) and the running decision
+> log in [decisions.md](decisions.md).
 
 ## 0. Relationship to decisions.md
 
@@ -8,11 +18,11 @@ decisions.md is the running log of target-architecture decisions; this design do
 |---|---|
 | Narrative chunks + embeddings in Neon (pgvector) | ✅ Implemented as decided |
 | Claim check as one batch verification call (not per-claim) | ✅ Implemented as decided |
-| Question routing: numeric → SQL/metrics layer, narrative → RAG | ⏸ Deferred to Phase 2 — all questions go through RAG this phase; numeric/aggregation questions get an explicit "not yet supported" data-boundary reply |
-| Numeric data from SEC XBRL Company Facts API | ⏸ Deferred to Phase 2 (schema and pitfalls already documented in data-dictionary.md) |
-| Offline eval gate in CI on every model/prompt change | 🔽 Downgraded: the eval script has release-gate semantics (non-zero exit above threshold) but is run manually this phase |
-| Golden set of 30–50 cases | 🔽 Downgraded: 10–15 cases this phase, same format, grows toward the target |
-| Upload-document trust rules & sanitization | ⏸ Deferred to Phase 2 (fixed local corpus this phase) |
+| Question routing: numeric → SQL/metrics layer, narrative → RAG | ⏸ was deferred → **✅ shipped in Phase 2** (router with narrative / numeric / hybrid / out-of-scope + deterministic guards; see `app/router.py`) |
+| Numeric data from SEC XBRL Company Facts API | ⏸ was deferred → **✅ shipped in Phase 2** (28-metric registry, annual-forms-only fact selection, provenance links; `app/xbrl.py`, `app/metrics.py`) |
+| Offline eval gate in CI on every model/prompt change | 🔽 was manual → **✅ enforced in practice**: every prompt/retrieval change gates on the 36-case golden set (unsupported ≤4% · numerics 6/6 · boilerplate ≤25%) before shipping |
+| Golden set of 30–50 cases | 🔽 was 10–15 → **✅ 36 cases** (25 narrative · 6 numeric · 5 boundary), plus the FinanceBench external benchmark (112 Q) |
+| Upload-document trust rules & sanitization | ⏸ still deferred — the corpus remains official SEC EDGAR filings only, which is itself the trust rule |
 
 ## 1. Goal & Scope
 
