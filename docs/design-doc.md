@@ -11,7 +11,13 @@
 
 ## 0. Relationship to decisions.md
 
-decisions.md is the running log of target-architecture decisions; this design doc is the Phase-1 (one-day) implementation plan for the narrative/RAG line of that architecture. Where this doc deviates from a recorded decision, the deviation is deliberate and listed here:
+> *decisions.md (and project-requirements.md) were internal Chinese-language
+> working documents — a running decision log and a requirements draft. They
+> have been removed from the repo as superseded; every reference to them
+> below is historical. The decision statuses they tracked are preserved in
+> the table that follows, and the originals remain available in git history.*
+
+decisions.md was the running log of target-architecture decisions; this design doc is the Phase-1 (one-day) implementation plan for the narrative/RAG line of that architecture. Where this doc deviates from a recorded decision, the deviation is deliberate and listed here:
 
 | decisions.md decision | Phase 1 status |
 |---|---|
